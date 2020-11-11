@@ -3,48 +3,27 @@
 #include <QGraphicsRectItem>
 
 template <typename T>
-void Grid<T>::initialize(const std::shared_ptr<DSR::DSRGraph> &graph_,
-                         std::shared_ptr<Collisions> collisions_,
-                         Dimensions dim_,
+void Grid<T>::initialize(Dimensions dim_,
                          bool read_from_file,
                          const std::string &file_name)
 {
     qDebug() << __FUNCTION__ << "FileName:" << QString::fromStdString(file_name);
-    G = graph_;
     uint count = 0;
     dim = dim_;
     qInfo() << __FUNCTION__ << dim.HMIN << dim.WIDTH << dim.VMIN << dim.HEIGHT;
     fmap.clear();
-    fmap_aux.clear();
 
     if(read_from_file and not file_name.empty())
-    {
         readFromFile(file_name);
-        fmap_aux = fmap;
-    }
     else
     {
-        std::cout << __FUNCTION__ << "Collisions - checkRobotValidStateAtTargetFast" << std::endl;
-        auto G_copy = G->G_copy();
         for (int i = dim.HMIN; i < dim.HMIN + dim.WIDTH; i += dim.TILE_SIZE)
-        {
             for (int j = dim.VMIN; j < dim.VMIN + dim.HEIGHT; j += dim.TILE_SIZE)
-            {
-                auto[free, node_name] = collisions_->checkRobotValidStateAtTargetFast(G_copy,
-                                                                                      std::vector<float>{(float) i,
-                                                                                                         (float) j, 10},
-                                                                                      std::vector<float>{0.0, 0.0,
-                                                                                                         0.0});
-                fmap.emplace(Key(i, j), T{count++, free, true, 1.f, node_name});
-            }
-            std::cout << __FUNCTION__ << " Progress: " << i*100/(dim.HMIN+dim.WIDTH) << std::endl;
-        }
-        fmap_aux = fmap;
+                fmap.emplace(Key(i, j), T{count++, true, false, 1.f, ""});
         if(not file_name.empty())
             saveToFile(file_name);
     }
 }
-
 
 template <typename T>
 std::tuple<bool, T &> Grid<T>::getCell(long int x, long int z)

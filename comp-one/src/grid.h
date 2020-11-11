@@ -24,9 +24,8 @@
 #include <cppitertools/zip.hpp>
 #include <cppitertools/range.hpp>
 #include <limits>
-#include <collisions.h>
+#include <QtCore>
 #include <QGraphicsScene>
-
 
 struct TCellDefault
 {
@@ -73,7 +72,6 @@ class Grid
                 void save(std::ostream &os) const   { os << x << " " << z << " "; }; //method to save the keys
                 void read(std::istream &is)         { is >> x >> z; };					   //method to read the keys
         };
-
         struct KeyHasher
         {
             std::size_t operator()(const Key &k) const
@@ -91,11 +89,7 @@ class Grid
         using FMap = std::unordered_map<Key, T, KeyHasher>;
         Dimensions dim;
 
-        void initialize(const std::shared_ptr<DSR::DSRGraph> &graph_,
-                        std::shared_ptr<Collisions> collisions_,
-                        Dimensions dim_,
-                        bool read_from_file = true,
-                        const std::string &file_name = std::string());
+        void initialize(Dimensions dim_, bool read_from_file = true, const std::string &file_name = std::string());
         std::tuple<bool, T &> getCell(long int x, long int z);
         std::tuple<bool, T &> getCell(const Key &k);
         T at(const Key &k) const                            { return fmap.at(k);};
@@ -105,13 +99,9 @@ class Grid
         typename FMap::const_iterator begin() const         { return fmap.begin(); };
         typename FMap::const_iterator end() const           { return fmap.begin(); };
         size_t size() const                                 { return fmap.size(); };
-        FMap getMap()                                       { return fmap_aux; }
-        void resetGrid()                                    { fmap = fmap_aux; }
+
         template <typename Q>
-        void insert(const Key &key, const Q &value)
-        {
-            fmap.insert(std::make_pair(key, value));
-        }
+        void insert(const Key &key, const Q &value)         { fmap.insert(std::make_pair(key, value)); }
         void clear();
         void saveToFile(const std::string &fich);
         void readFromFile(const std::string &fich);
@@ -129,11 +119,9 @@ class Grid
         std::vector<std::pair<Key, T>> neighboors_8(const Key &k,  bool all = false);
         std::vector<std::pair<Key, T>> neighboors_16(const Key &k,  bool all = false);
         void draw(QGraphicsScene* scene);
-        Dimensions getDim() const                           { return dim;};  //deprecated
 
     private:
-        FMap fmap, fmap_aux;
-        std::shared_ptr<DSR::DSRGraph> G;
+        FMap fmap;
         std::vector<QGraphicsRectItem *> scene_grid_points;
         std::list<QPointF> orderPath(const std::vector<std::pair<std::uint32_t, Key>> &previous, const Key &source, const Key &target);
         inline double heuristicL2(const Key &a, const Key &b) const;

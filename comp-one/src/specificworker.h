@@ -29,6 +29,10 @@
 
 #include <genericworker.h>
 #include <innermodel/innermodel.h>
+#include <QGraphicsScene>
+#include <QGraphicsView>
+#include "grid.cpp"
+#include "grid.h"
 
 class SpecificWorker : public GenericWorker
 {
@@ -44,9 +48,15 @@ public slots:
 	void compute();
 	int startup_check();
 	void initialize(int period);
+
 private:
 	std::shared_ptr < InnerModel > innerModel;
 	bool startup_check_flag;
+
+	// Grid
+	Grid<> grid;
+    QGraphicsScene scene;
+    QGraphicsView *view;
 
 };
 

@@ -47,54 +47,51 @@ bool SpecificWorker::setParams(RoboCompCommonBehavior::ParameterList params)
 //	catch(const std::exception &e) { qFatal("Error reading config params"); }
 
 
-
-
-
-
 	return true;
 }
 
 void SpecificWorker::initialize(int period)
 {
 	std::cout << "Initialize worker" << std::endl;
+
+	//grid
+	Grid<>::Dimensions dim;  //default values
+	grid.initialize(dim);
+
+	//view
+	view = new QGraphicsView(&scene);
+    view->setMinimumSize(400,400);
+    scene.setItemIndexMethod(QGraphicsScene::NoIndex);
+    view->scale(1, -1);
+
+    //robot
+    
+
 	this->Period = period;
 	if(this->startup_check_flag)
-	{
 		this->startup_check();
-	}
 	else
-	{
 		timer.start(Period);
-	}
-
 }
 
 void SpecificWorker::compute()
 {
-	//computeCODE
-	//QMutexLocker locker(mutex);
-	//try
-	//{
-	//  camera_proxy->getYImage(0,img, cState, bState);
-	//  memcpy(image_gray.data, &img[0], m_width*m_height*sizeof(uchar));
-	//  searchTags(image_gray);
-	//}
-	//catch(const Ice::Exception &e)
-	//{
-	//  std::cout << "Error reading from Camera" << e << std::endl;
-	//}
-	
-	
+    RoboCompGenericBase::TBaseState bState;
+	try
+	{
+	  differentialrobot_proxy->getBaseState(bState);
+	}
+	catch(const Ice::Exception &e)
+	{ std::cout << "Error reading from Camera" << e << std::endl;}
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {
 	std::cout << "Startup check" << std::endl;
 	QTimer::singleShot(200, qApp, SLOT(quit()));
 	return 0;
 }
-
-
 
 
 /**************************************/
