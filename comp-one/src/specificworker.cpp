@@ -56,14 +56,13 @@ void SpecificWorker::initialize(int period)
 
 	//grid
 	Grid<>::Dimensions dim;  //default values
-	grid.initialize(dim);
+	grid.initialize(&scene, dim);
 
 	//view
     graphicsView->setScene(&scene);
 	graphicsView->setMinimumSize(400,400);
     scene.setItemIndexMethod(QGraphicsScene::NoIndex);
-    //scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
-    scene.setSceneRect(-2500, -2500, 5000, 5000);
+    scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
     graphicsView->scale(1, -1);
     graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
     graphicsView->show();
@@ -105,13 +104,24 @@ void SpecificWorker::compute()
     try
     {
         auto ldata = laser_proxy->getLaserData();
-        draw_laser(ldata);
+        auto laser_poly = draw_laser(ldata);
+        fill_grid(laser_poly);
     }
     catch(const Ice::Exception &e)
     { std::cout << "Error reading from Camera" << e << std::endl;}
 }
 
-void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
+void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
+{
+    for(auto &[k, v] : grid)
+        if(laser_poly.containsPoint(QPointF(k.x, k.z), Qt::OddEvenFill))
+            v.free = true;
+        else
+            v.free = false;
+    grid.draw(&scene);
+}
+
+QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
 {
     if (laser_polygon != nullptr)
         scene.removeItem(laser_polygon);
@@ -124,8 +134,8 @@ void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
     color.setAlpha(60);
     laser_polygon = scene.addPolygon(poly, QPen(color), QBrush(color));
     laser_polygon->setZValue(3);
+    return poly;
 }
-
 ///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {
@@ -133,7 +143,6 @@ int SpecificWorker::startup_check()
 	QTimer::singleShot(200, qApp, SLOT(quit()));
 	return 0;
 }
-
 
 /**************************************/
 // From the RoboCompDifferentialRobot you can call this methods:

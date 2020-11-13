@@ -52,7 +52,7 @@ public slots:
 private:
 	std::shared_ptr < InnerModel > innerModel;
 	bool startup_check_flag;
-	void draw_laser(const RoboCompLaser::TLaserData &ldata);
+	QPolygonF draw_laser(const RoboCompLaser::TLaserData &ldata);
 
 	// Grid
 	Grid<> grid;
@@ -60,6 +60,7 @@ private:
     QGraphicsItem *robot_polygon = nullptr;
     QGraphicsItem *laser_polygon = nullptr;
     const float ROBOT_LENGTH = 400;
+    void fill_grid(const QPolygonF &ldata);
 
 };
 

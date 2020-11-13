@@ -3,7 +3,8 @@
 #include <QGraphicsRectItem>
 
 template <typename T>
-void Grid<T>::initialize(Dimensions dim_,
+void Grid<T>::initialize(QGraphicsScene* scene,
+                         Dimensions dim_,
                          bool read_from_file,
                          const std::string &file_name)
 {
@@ -12,14 +13,19 @@ void Grid<T>::initialize(Dimensions dim_,
     dim = dim_;
     qInfo() << __FUNCTION__ << dim.HMIN << dim.WIDTH << dim.VMIN << dim.HEIGHT;
     fmap.clear();
-
     if(read_from_file and not file_name.empty())
         readFromFile(file_name);
     else
     {
         for (int i = dim.HMIN; i < dim.HMIN + dim.WIDTH; i += dim.TILE_SIZE)
             for (int j = dim.VMIN; j < dim.VMIN + dim.HEIGHT; j += dim.TILE_SIZE)
-                fmap.emplace(Key(i, j), T{count++, true, false, 1.f, ""});
+            {
+                T t;
+                t.id = count++; t.free = true; t.visited = false;
+                Key k(i, j);
+                t.g_item = scene->addRect(k.x, k.z, 50, 50, QPen(free_color), QBrush(QColor(free_color)));
+                fmap.emplace(k, t);
+            }
         if(not file_name.empty())
             saveToFile(file_name);
     }
@@ -179,7 +185,7 @@ bool Grid<T>::isFree(const Key &k)
 template <typename T>
 void Grid<T>::setFree(const Key &k)
 {
-    auto &[success, v] = getCell(k);
+    auto [success, v] = getCell(k);
     if(success)
         v.free = true;
 }
@@ -197,7 +203,7 @@ bool Grid<T>::cellNearToOccupiedCellByObject(const Key &k, const std::string &ta
 template <typename T>
 void Grid<T>::setOccupied(const Key &k)
 {
-    auto &[success, v] = getCell(k);
+    auto [success, v] = getCell(k);
     if(success)
         v.free = false;
 }
@@ -357,41 +363,34 @@ inline double Grid<T>::heuristicL2(const Key &a, const Key &b) const
 template <typename T>
 void Grid<T>::draw(QGraphicsScene* scene)
 {
-    //clear previous points
-    for (QGraphicsRectItem* item : scene_grid_points)
-        scene->removeItem((QGraphicsItem*)item);
-
-    scene_grid_points.clear();
-    //create new representation
-    std::string color;
-    for( const auto &[key,value] : fmap)
+    for (const auto &[key, value] : fmap)
     {
-        if(value.free)
-        {
-            if (value.cost == 2.0) //affordance spaces
-                color = "#FFFF00";
-            else if (value.cost == 3.0) //lowvisited spaces
-                color = "#FFBF00";
-            else if (value.cost == 4.0) //mediumvisited spaces
-                color = "#FF8000";
-            else if (value.cost == 5.0) //highVisited spaces
-                color = "#FF4000";
-            else if (value.cost == 8.0) //zona social
-                color = "#00BFFF";
-            else if (value.cost == 10.0) //zona personal
-                color = "#BF00FF";
-            else
-                color = "#E6E6E6";
-        }
+        if (value.free)
+            value.g_item->setBrush(QColor(free_color));
         else
-            color = "#B40404";
-
-        QColor my_color = QColor(QString::fromStdString(color));
-        //my_color.setAlpha(60);
-        QGraphicsRectItem* aux = scene->addRect(key.x, key.z, 50, 50, QPen(my_color), QBrush(my_color));
-        aux->setZValue(1);
-        scene_grid_points.push_back(aux);
+            value.g_item->setBrush(QColor(occupied_color));
     }
+
+    //clear previous points
+//    for (QGraphicsRectItem* item : scene_grid_points)
+//        scene->removeItem((QGraphicsItem*)item);
+//
+//    scene_grid_points.clear();
+//    //create new representation
+//    std::string color;
+//    for( const auto &[key,value] : fmap)
+//    {
+//        if(value.free)
+//            color = "#FFFF00";
+//        else
+//            color = "#B40404";
+//
+//        QColor my_color = QColor(QString::fromStdString(color));
+//        //my_color.setAlpha(60);
+//        QGraphicsRectItem* aux = scene->addRect(key.x, key.z, 50, 50, QPen(my_color), QBrush(my_color));
+//        aux->setZValue(1);
+//        scene_grid_points.push_back(aux);
+//    }
 }
 
 template <typename T>

@@ -26,6 +26,7 @@
 #include <limits>
 #include <QtCore>
 #include <QGraphicsScene>
+# include <QPen>
 
 struct TCellDefault
 {
@@ -34,8 +35,7 @@ struct TCellDefault
     bool visited;
     float cost;
     std::string node_name;
-    //bool
-
+    QGraphicsRectItem* g_item;
     // method to save the value
     void save(std::ostream &os) const {	os << free << " " << visited << " " << node_name; };
     void read(std::istream &is) {	is >> free >> visited >> node_name;};
@@ -48,7 +48,7 @@ class Grid
         struct Dimensions
         {
             int TILE_SIZE = 100;
-            float HMIN = -2500, VMIN = -2500, WIDTH = 2500, HEIGHT = 2500;
+            float HMIN = -2500, VMIN = -2500, WIDTH = 5000, HEIGHT = 5000;
         };
         struct Key
         {
@@ -89,7 +89,7 @@ class Grid
         using FMap = std::unordered_map<Key, T, KeyHasher>;
         Dimensions dim;
 
-        void initialize(Dimensions dim_, bool read_from_file = true, const std::string &file_name = std::string());
+        void initialize(QGraphicsScene* scene, Dimensions dim_, bool read_from_file = true, const std::string &file_name = std::string());
         std::tuple<bool, T &> getCell(long int x, long int z);
         std::tuple<bool, T &> getCell(const Key &k);
         T at(const Key &k) const                            { return fmap.at(k);};
@@ -125,8 +125,8 @@ class Grid
         std::vector<QGraphicsRectItem *> scene_grid_points;
         std::list<QPointF> orderPath(const std::vector<std::pair<std::uint32_t, Key>> &previous, const Key &source, const Key &target);
         inline double heuristicL2(const Key &a, const Key &b) const;
+        const QString free_color = "#FFFF00";
+        const QString occupied_color = "#0000FF";
 };
-
-
 
 #endif // GRID_H
