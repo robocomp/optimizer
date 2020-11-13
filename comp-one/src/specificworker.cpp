@@ -59,13 +59,30 @@ void SpecificWorker::initialize(int period)
 	grid.initialize(dim);
 
 	//view
-	view = new QGraphicsView(&scene);
-    view->setMinimumSize(400,400);
+    graphicsView->setScene(&scene);
+	graphicsView->setMinimumSize(400,400);
     scene.setItemIndexMethod(QGraphicsScene::NoIndex);
-    view->scale(1, -1);
+    //scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
+    scene.setSceneRect(-2500, -2500, 5000, 5000);
+    graphicsView->scale(1, -1);
+    graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
+    graphicsView->show();
 
     //robot
-    
+    QPolygonF poly2;
+    float size = ROBOT_LENGTH / 2.f;
+    poly2 << QPoint(-size, -size)
+          << QPoint(-size, size)
+          << QPoint(-size / 3, size * 1.6)
+          << QPoint(size / 3, size * 1.6)
+          << QPoint(size, size)
+          << QPoint(size, -size);
+    QBrush brush;
+    brush.setColor(QColor("DarkRed"));
+    brush.setStyle(Qt::SolidPattern);
+    robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), brush);
+    robot_polygon->setZValue(5);
+    robot_polygon->setPos(0,0);
 
 	this->Period = period;
 	if(this->startup_check_flag)
@@ -79,10 +96,34 @@ void SpecificWorker::compute()
     RoboCompGenericBase::TBaseState bState;
 	try
 	{
-	  differentialrobot_proxy->getBaseState(bState);
-	}
+	    differentialrobot_proxy->getBaseState(bState);
+        robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
+        robot_polygon->setPos(bState.x,bState.z);
+    }
 	catch(const Ice::Exception &e)
 	{ std::cout << "Error reading from Camera" << e << std::endl;}
+    try
+    {
+        auto ldata = laser_proxy->getLaserData();
+        draw_laser(ldata);
+    }
+    catch(const Ice::Exception &e)
+    { std::cout << "Error reading from Camera" << e << std::endl;}
+}
+
+void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
+{
+    if (laser_polygon != nullptr)
+        scene.removeItem(laser_polygon);
+
+    QPolygonF poly;
+    for( auto &l : ldata)
+        poly << robot_polygon->mapToScene(QPointF(l.dist * sin(l.angle), l.dist * cos(l.angle)));
+
+    QColor color("LightGreen");
+    color.setAlpha(60);
+    laser_polygon = scene.addPolygon(poly, QPen(color), QBrush(color));
+    laser_polygon->setZValue(3);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
