@@ -33,6 +33,7 @@
 #include <QGraphicsView>
 #include "grid.cpp"
 #include "grid.h"
+#include "gurobi_c++.h"
 
 class SpecificWorker : public GenericWorker
 {
