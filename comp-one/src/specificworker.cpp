@@ -36,17 +36,14 @@ SpecificWorker::~SpecificWorker()
 
 bool SpecificWorker::setParams(RoboCompCommonBehavior::ParameterList params)
 {
-//	THE FOLLOWING IS JUST AN EXAMPLE
-//	To use innerModelPath parameter you should uncomment specificmonitor.cpp readConfig method content
-//	try
-//	{
-//		RoboCompCommonBehavior::Parameter par = params.at("InnerModelPath");
-//		std::string innermodel_path = par.value;
-//		innerModel = std::make_shared(innermodel_path);
-//	}
-//	catch(const std::exception &e) { qFatal("Error reading config params"); }
+	try
+	{
+		RoboCompCommonBehavior::Parameter par = params.at("InnerModelPath");
+		std::string innermodel_path = par.value;
+		innerModel = std::make_shared<InnerModel>(innermodel_path);
 
-
+	}
+	catch(const std::exception &e) { qFatal("Error reading config params"); }
 	return true;
 }
 
@@ -92,23 +89,60 @@ void SpecificWorker::initialize(int period)
 
 void SpecificWorker::compute()
 {
+    auto bState = read_base();
+    auto laser_poly = read_laser();
+    fill_grid(laser_poly);
+    auto [x,z,alpha] = state_change(bState, 0.1);  //secs
+    qInfo() << bState.x << bState.z << bState.alpha << "--" << x << z << alpha;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+RoboCompGenericBase::TBaseState SpecificWorker::read_base()
+{
     RoboCompGenericBase::TBaseState bState;
-	try
-	{
-	    differentialrobot_proxy->getBaseState(bState);
-        robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
-        robot_polygon->setPos(bState.x,bState.z);
-    }
-	catch(const Ice::Exception &e)
-	{ std::cout << "Error reading from Camera" << e << std::endl;}
     try
     {
-        auto ldata = laser_proxy->getLaserData();
-        auto laser_poly = draw_laser(ldata);
-        fill_grid(laser_poly);
+        differentialrobot_proxy->getBaseState(bState);
+        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
+        robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
+        robot_polygon->setPos(bState.x, bState.z);
     }
     catch(const Ice::Exception &e)
     { std::cout << "Error reading from Camera" << e << std::endl;}
+    return bState;
+}
+
+QPolygonF SpecificWorker::read_laser()
+{
+    QPolygonF laser_poly;
+    try
+    {
+        auto ldata = laser_proxy->getLaserData();
+        laser_poly = draw_laser(ldata);
+    }
+    catch(const Ice::Exception &e)
+    { std::cout << "Error reading from Camera" << e << std::endl;}
+    return laser_poly;
+}
+
+std::tuple<float,float,float> SpecificWorker::state_change( const RoboCompGenericBase::TBaseState &bState, float delta_t)
+{
+    float rot = bState.rotV;
+    float adv = bState.advVz;
+
+    if (fabs(rot) > 0.05)
+    {
+        float r = adv / rot; //radio
+        float x = r - r * cos(rot * delta_t);
+        float z = r * sin(rot * delta_t);
+        QVec res =  innerModel->transform6D("world", QVec::vec6(x, 0, z, 0, rot * delta_t, 0), "base");
+        return std::make_tuple(res.x(), res.z(), res.ry());
+    }
+    else
+    {
+        QVec res = innerModel->transform6D("world", QVec::vec6(0, 0,adv * delta_t, 0, 0, 0), "base");
+        return std::make_tuple(res.x(), res.z(), res.ry());
+    }
 }
 
 void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
@@ -136,6 +170,7 @@ QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
     laser_polygon->setZValue(3);
     return poly;
 }
+
 ///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {

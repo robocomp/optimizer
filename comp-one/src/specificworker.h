@@ -44,7 +44,6 @@ public:
 	bool setParams(RoboCompCommonBehavior::ParameterList params);
 
 
-
 public slots:
 	void compute();
 	int startup_check();
@@ -54,6 +53,11 @@ private:
 	std::shared_ptr < InnerModel > innerModel;
 	bool startup_check_flag;
 	QPolygonF draw_laser(const RoboCompLaser::TLaserData &ldata);
+	QPolygonF read_laser();
+	RoboCompGenericBase::TBaseState read_base();
+
+	//robot
+    std::tuple<float,float,float> state_change(const RoboCompGenericBase::TBaseState &bState, float delta_t);
 
 	// Grid
 	Grid<> grid;
