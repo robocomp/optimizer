@@ -56,8 +56,17 @@ private:
 	QPolygonF read_laser();
 	RoboCompGenericBase::TBaseState read_base();
 
-	//robot
+	// robot
     std::tuple<float,float,float> state_change(const RoboCompGenericBase::TBaseState &bState, float delta_t);
+
+    // target
+    QPointF target;
+
+    // path
+    std::vector<QPointF> path;
+    std::vector<QGraphicsEllipseItem *> path_paint;
+    QString path_color = "#FF00FF";
+    void draw_path();
 
 	// Grid
 	Grid<> grid;
@@ -66,6 +75,7 @@ private:
     QGraphicsItem *laser_polygon = nullptr;
     const float ROBOT_LENGTH = 400;
     void fill_grid(const QPolygonF &ldata);
+
 
 };
 

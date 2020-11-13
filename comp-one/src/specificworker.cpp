@@ -80,6 +80,14 @@ void SpecificWorker::initialize(int period)
     robot_polygon->setZValue(5);
     robot_polygon->setPos(0,0);
 
+    // target
+    target = QPointF(0, 2200);
+
+    // path
+    for(auto i : iter::range(0, 2200, 100))
+        path.emplace_back(QPointF(100 - qrand()%200, i));
+    draw_path();
+
 	this->Period = period;
 	if(this->startup_check_flag)
 		this->startup_check();
@@ -93,6 +101,7 @@ void SpecificWorker::compute()
     auto laser_poly = read_laser();
     fill_grid(laser_poly);
     auto [x,z,alpha] = state_change(bState, 0.1);  //secs
+    draw_path();
     qInfo() << bState.x << bState.z << bState.alpha << "--" << x << z << alpha;
 }
 
@@ -165,10 +174,18 @@ QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
         poly << robot_polygon->mapToScene(QPointF(l.dist * sin(l.angle), l.dist * cos(l.angle)));
 
     QColor color("LightGreen");
-    color.setAlpha(60);
+    color.setAlpha(40);
     laser_polygon = scene.addPolygon(poly, QPen(color), QBrush(color));
     laser_polygon->setZValue(3);
     return poly;
+}
+
+void SpecificWorker::draw_path()
+{
+    for(auto p : path_paint)
+        scene.removeItem(p);
+    for(auto &p : path)
+        path_paint.push_back(scene.addEllipse(p.x()-25, p.y()-25, 50 , 50, QPen(path_color), QBrush(QColor(path_color))));
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -178,30 +195,4 @@ int SpecificWorker::startup_check()
 	QTimer::singleShot(200, qApp, SLOT(quit()));
 	return 0;
 }
-
-/**************************************/
-// From the RoboCompDifferentialRobot you can call this methods:
-// this->differentialrobot_proxy->correctOdometer(...)
-// this->differentialrobot_proxy->getBasePose(...)
-// this->differentialrobot_proxy->getBaseState(...)
-// this->differentialrobot_proxy->resetOdometer(...)
-// this->differentialrobot_proxy->setOdometer(...)
-// this->differentialrobot_proxy->setOdometerPose(...)
-// this->differentialrobot_proxy->setSpeedBase(...)
-// this->differentialrobot_proxy->stopBase(...)
-
-/**************************************/
-// From the RoboCompDifferentialRobot you can use this types:
-// RoboCompDifferentialRobot::TMechParams
-
-/**************************************/
-// From the RoboCompLaser you can call this methods:
-// this->laser_proxy->getLaserAndBStateData(...)
-// this->laser_proxy->getLaserConfData(...)
-// this->laser_proxy->getLaserData(...)
-
-/**************************************/
-// From the RoboCompLaser you can use this types:
-// RoboCompLaser::LaserConfData
-// RoboCompLaser::TData
 

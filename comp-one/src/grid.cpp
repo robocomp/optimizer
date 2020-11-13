@@ -363,29 +363,16 @@ inline double Grid<T>::heuristicL2(const Key &a, const Key &b) const
 template <typename T>
 void Grid<T>::draw(QGraphicsScene* scene)
 {
+    QColor f_color(free_color); f_color.setAlpha(50);
+    QColor o_color(occupied_color); o_color.setAlpha(10);
     for (const auto &[key, value] : fmap)
     {
         if (value.free)
-            value.g_item->setBrush(QColor(free_color));
+            value.g_item->setBrush(f_color);
         else
-            value.g_item->setBrush(QColor(occupied_color));
+            value.g_item->setBrush(o_color);
     }
 
-    //clear previous points
-//    for (QGraphicsRectItem* item : scene_grid_points)
-//        scene->removeItem((QGraphicsItem*)item);
-//
-//    scene_grid_points.clear();
-//    //create new representation
-//    std::string color;
-//    for( const auto &[key,value] : fmap)
-//    {
-//        if(value.free)
-//            color = "#FFFF00";
-//        else
-//            color = "#B40404";
-//
-//        QColor my_color = QColor(QString::fromStdString(color));
 //        //my_color.setAlpha(60);
 //        QGraphicsRectItem* aux = scene->addRect(key.x, key.z, 50, 50, QPen(my_color), QBrush(my_color));
 //        aux->setZValue(1);
