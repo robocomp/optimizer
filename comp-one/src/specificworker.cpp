@@ -31,6 +31,7 @@ SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorke
 */
 SpecificWorker::~SpecificWorker()
 {
+    delete env;
 	std::cout << "Destroying SpecificWorker" << std::endl;
 }
 
@@ -88,6 +89,8 @@ void SpecificWorker::initialize(int period)
         path.emplace_back(QPointF(100 - qrand()%200, i));
     draw_path();
 
+    initialize_model();
+
 	this->Period = period;
 	if(this->startup_check_flag)
 		this->startup_check();
@@ -103,6 +106,71 @@ void SpecificWorker::compute()
     auto [x,z,alpha] = state_change(bState, 0.1);  //secs
     draw_path();
     qInfo() << bState.x << bState.z << bState.alpha << "--" << x << z << alpha;
+}
+
+void SpecificWorker::initialize_model()
+{
+    // Create environment
+    env = new GRBEnv("path_optimization.log");
+
+    // Create initial model
+    model = new GRBModel(*env);
+    model->set(GRB_StringAttr_ModelName, "path_optimization");
+
+    uint np = path.size();
+    model_vars = model->addVars(4*np, GRB_CONTINUOUS);
+    
+    for (uint e = 0; e < np; e++)
+    {
+        ostringstream vnamex, vnamey;
+        vnamex << "x" << e;
+        model_vars[e*2].set(GRB_StringAttr_VarName, vnamex.str());
+        vnamey << "y" << e;
+        model_vars[e*2+1].set(GRB_StringAttr_VarName, vnamey.str());
+    }
+    for (uint e = np; e < 2*np; e++)
+    {
+        ostringstream vnameu, vnamev;
+        vnameu << "u" << e-path.size();
+        model_vars[e*2].set(GRB_StringAttr_VarName, vnameu.str());
+        vnamev << "v" << e-path.size();
+        model_vars[e*2+1].set(GRB_StringAttr_VarName, vnamev.str());
+    }
+
+    GRBQuadExpr fpoint, lpoint;
+    fpoint = model_vars[0]*model_vars[0];
+    fpoint += model_vars[1]*model_vars[1];
+    lpoint = (model_vars[(np-1)*2]-0)*(model_vars[(np-1)*2]-0);
+    lpoint +=(model_vars[(np-1)*2+1]-2200.)*(model_vars[(np-1)*2+1]-2200.);
+
+    model->addQConstr(fpoint <= 0.00001, "c0");
+    model->addQConstr(lpoint <= 0.00001, "c1");
+
+    GRBQuadExpr obj;
+    obj = 0;
+    for (uint e = 0; e < np-1; e++)
+    {
+        obj += (model_vars[e*2]-model_vars[(e+1)*2])*(model_vars[e*2]-model_vars[(e+1)*2]);
+        obj += (model_vars[e*2+1]-model_vars[(e+1)*2+1])*(model_vars[e*2+1]-model_vars[(e+1)*2+1]);
+    }
+    model->setObjective(obj, GRB_MINIMIZE);
+    model->optimize();
+
+    path.clear();
+    for(uint e = 0; e < np; e++)
+    {
+        float x = model_vars[e*2].get(GRB_DoubleAttr_X);
+        cout << model_vars[e*2].get(GRB_StringAttr_VarName) << " "
+         << x << endl;
+        float y = model_vars[e*2+1].get(GRB_DoubleAttr_X);
+        cout << model_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+         << y << endl;
+        path.emplace_back(QPointF(x, y));
+    }
+}
+void SpecificWorker::optimize()
+{
+
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -184,6 +252,7 @@ void SpecificWorker::draw_path()
 {
     for(auto p : path_paint)
         scene.removeItem(p);
+    path_paint.clear();
     for(auto &p : path)
         path_paint.push_back(scene.addEllipse(p.x()-25, p.y()-25, 50 , 50, QPen(path_color), QBrush(QColor(path_color))));
 }

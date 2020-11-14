@@ -18,6 +18,6 @@ include_directories($ENV{GUROBI_HOME}/include/)
 
 link_directories($ENV{GUROBI_HOME}/lib/)
 
-SET (LIBS ${LIBS} -L/home/robocomp/software/gurobi910/linux64/lib gurobi91)
+SET (LIBS ${LIBS} gurobi_c++ gurobi91)
 
 

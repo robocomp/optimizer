@@ -73,7 +73,15 @@ private:
     QGraphicsScene scene;
     QGraphicsItem *robot_polygon = nullptr;
     QGraphicsItem *laser_polygon = nullptr;
+
+	// Model and optimizations
+	GRBEnv *env;
+	GRBModel *model;
+	GRBVar *model_vars;
+
     const float ROBOT_LENGTH = 400;
+	void initialize_model();
+	void optimize();
     void fill_grid(const QPolygonF &ldata);
 
 
