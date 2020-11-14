@@ -85,16 +85,19 @@ void SpecificWorker::initialize(int period)
     target = QPointF(0, 2200);
 
     // path
-    for(auto i : iter::range(0, 2200, 100))
-        path.emplace_back(QPointF((100 - qrand()%200), i));
-    draw_path();
+//    for(auto i : iter::range(0, 2200, 100))
+//        path.emplace_back(QPointF((100 - qrand()%200), i));
+//    draw_path();
 
     if( auto res = init_optmizer(); res.has_value())
     {
+        qInfo() << "------res---------";
         std::cout << res.value() << std::endl;
     }
     else
+    {
         std::cout << "ERROR" << std::endl;
+    }
 
 
 	this->Period = period;
@@ -113,30 +116,30 @@ void SpecificWorker::compute()
     //qInfo() << bState.x << bState.z << bState.alpha << "--" << x << z << alpha;
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-std::optional<Eigen::Matrix<double, 4, 1>> SpecificWorker::init_optmizer()
+std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
 {
     // set the preview window
     int mpcWindow = 20;
 
     // allocate the dynamics matrices
-    Eigen::Matrix<double, 4, 4> A;
-    Eigen::Matrix<double, 4, 2> B;
+    Eigen::Matrix<double, 2, 2> A;
+    Eigen::Matrix<double, 2, 2> B;
 
     // allocate the constraints vector
-    Eigen::Matrix<double, 4, 1> xMax;
-    Eigen::Matrix<double, 4, 1> xMin;
+    Eigen::Matrix<double, 2, 1> xMax;
+    Eigen::Matrix<double, 2, 1> xMin;
     Eigen::Matrix<double, 2, 1> uMax;
     Eigen::Matrix<double, 2, 1> uMin;
 
     // allocate the weight matrices
-    Eigen::DiagonalMatrix<double, 4> Q;
+    Eigen::DiagonalMatrix<double, 2> Q;
     Eigen::DiagonalMatrix<double, 2> R;
 
     // allocate the initial and the reference state space
-    Eigen::Matrix<double, 4, 1> x0;
-    Eigen::Matrix<double, 4, 1> xRef;
+    Eigen::Matrix<double, 2, 1> x0;
+    Eigen::Matrix<double, 2, 1> xRef;
 
-    // allocate QP problem matrices and vectores
+    // allocate QP problem matrices and vectors
     Eigen::SparseMatrix<double> hessian;
     Eigen::VectorXd gradient;
     Eigen::SparseMatrix<double> linearMatrix;
@@ -144,8 +147,8 @@ std::optional<Eigen::Matrix<double, 4, 1>> SpecificWorker::init_optmizer()
     Eigen::VectorXd upperBound;
 
     // set the initial and the desired states
-    x0 << 0, 0, 0, 0;
-    xRef << 0, 2200, 0, 0;
+    x0 << 0, 0;
+    xRef << -1000, -2200;
 
     // set MPC problem quantities
     setDynamicsMatrices(A, B);
@@ -166,8 +169,8 @@ std::optional<Eigen::Matrix<double, 4, 1>> SpecificWorker::init_optmizer()
     solver.settings()->setWarmStart(true);
 
     // set the initial data of the QP solver
-    solver.data()->setNumberOfVariables(4 * (mpcWindow + 1) + 2 * mpcWindow);
-    solver.data()->setNumberOfConstraints(2 * 4 * (mpcWindow + 1) +  2 * mpcWindow);
+    solver.data()->setNumberOfVariables(2 * (mpcWindow + 1) + 2 * mpcWindow);
+    solver.data()->setNumberOfConstraints(2 * 2 * (mpcWindow + 1) +  2 * mpcWindow);
     if(!solver.data()->setHessianMatrix(hessian)) return {};
     if(!solver.data()->setGradient(gradient)) return {};
     if(!solver.data()->setLinearConstraintsMatrix(linearMatrix)) return {};
@@ -192,7 +195,7 @@ std::optional<Eigen::Matrix<double, 4, 1>> SpecificWorker::init_optmizer()
 
         // get the controller input
         QPSolution = solver.getSolution();
-        ctr = QPSolution.block(4 * (mpcWindow + 1), 0, 4, 1);
+        ctr = QPSolution.block(2 * (mpcWindow + 1), 0, 2, 1);
 
         // save data into file
         //auto x0Data = x0.data();
@@ -200,60 +203,57 @@ std::optional<Eigen::Matrix<double, 4, 1>> SpecificWorker::init_optmizer()
         // propagate the model
         x0 = A * x0 + B * ctr;
 
+        double err = getErrorNorm(x0, xRef);
+        std::cout << "----------------- " << x0 << std::endl;
+        path.emplace_back(QPointF(x0.x(), x0.y()));
+        if(err < 5) break;
+
         // update the constraint bound
         updateConstraintVectors(x0, lowerBound, upperBound);
         if(!solver.updateBounds(lowerBound, upperBound)) return {};
     }
-    std::cout << x0 << std::endl;
+    draw_path();
     return x0;
 }
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-void SpecificWorker::setDynamicsMatrices(Eigen::Matrix<double, 4, 4> &A, Eigen::Matrix<double, 4, 2> &B)
+void SpecificWorker::setDynamicsMatrices(Eigen::Matrix<double, 2, 2> &A, Eigen::Matrix<double, 2, 2> &B)
 {
-    A <<    1., 0., 1., 0.,
-            0., 1., 0., 1.,
-            0., 0., 1., 0.,
-            0., 0., 0., 1.;
+    A <<    1., 0.,
+            0., 1.;
 
-    B <<    0., 0.,
-            0., 0.,
-            1., 0.,
+    B <<    1., 0.,
             0., 1.;
 }
-void SpecificWorker::setInequalityConstraints(Eigen::Matrix<double, 4, 1> &xMax, Eigen::Matrix<double, 4, 1> &xMin,
+void SpecificWorker::setInequalityConstraints(Eigen::Matrix<double, 2, 1> &xMax, Eigen::Matrix<double, 2, 1> &xMin,
                                               Eigen::Matrix<double, 2, 1> &uMax, Eigen::Matrix<double, 2, 1> &uMin)
 {
     xMax << 2500,
-            2500,
-            1.,
-            1.;
+            2500;
     xMin << -2500,
-            -2500,
-            1.,
-            1.;
-    uMax << 1000,
-            1;
-    uMin << -1000,
-            -1;
+            -2500;
+    uMax << 500,
+            500;
+    uMin << -500,
+            -500;
 }
-void SpecificWorker::setWeightMatrices(Eigen::DiagonalMatrix<double, 4> &Q, Eigen::DiagonalMatrix<double, 2> &R)
+void SpecificWorker::setWeightMatrices(Eigen::DiagonalMatrix<double, 2> &Q, Eigen::DiagonalMatrix<double, 2> &R)
 {
-    Q.diagonal() << 0, 0, 1., 1.;
-    R.diagonal() << 0.1, 0.1;
+    Q.diagonal() << 1., 1.;
+    R.diagonal() << 1, 1;
 }
-void SpecificWorker::castMPCToQPHessian(const Eigen::DiagonalMatrix<double, 4> &Q, const Eigen::DiagonalMatrix<double, 2> &R, int mpcWindow,
+void SpecificWorker::castMPCToQPHessian(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::DiagonalMatrix<double, 2> &R, int mpcWindow,
                                         Eigen::SparseMatrix<double> &hessianMatrix)
 {
-    hessianMatrix.resize(4 * (mpcWindow + 1) + 2 * mpcWindow, 4 * (mpcWindow + 1) + 2 * mpcWindow);
+    hessianMatrix.resize(2 * (mpcWindow + 1) + 2 * mpcWindow, 2 * (mpcWindow + 1) + 2 * mpcWindow);
 
     //populate hessian matrix
-    for (int i = 0; i < 4 * (mpcWindow + 1) + 2 * mpcWindow; i++)
+    for (int i = 0; i < 2 * (mpcWindow + 1) + 2 * mpcWindow; i++)
     {
-        if (i < 4 * (mpcWindow + 1))
+        if (i < 2 * (mpcWindow + 1))
         {
-            int posQ = i % 4;
+            int posQ = i % 2;
             float value = Q.diagonal()[posQ];
             if (value != 0)
                 hessianMatrix.insert(i, i) = value;
@@ -266,102 +266,101 @@ void SpecificWorker::castMPCToQPHessian(const Eigen::DiagonalMatrix<double, 4> &
         }
     }
 }
-void SpecificWorker::castMPCToQPGradient(const Eigen::DiagonalMatrix<double, 4> &Q, const Eigen::Matrix<double, 4, 1> &xRef, int mpcWindow,
+void SpecificWorker::castMPCToQPGradient(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::Matrix<double, 2, 1> &xRef, int mpcWindow,
                                          Eigen::VectorXd &gradient)
 {
-    Eigen::Matrix<double,4,1> Qx_ref;
+    Eigen::Matrix<double,2,1> Qx_ref;
     Qx_ref = Q * (-xRef);
 
     // populate the gradient vector
-    gradient = Eigen::VectorXd::Zero(4*(mpcWindow+1) +  2*mpcWindow, 1);
-    for(int i = 0; i<4*(mpcWindow+1); i++)
+    gradient = Eigen::VectorXd::Zero(2*(mpcWindow+1) +  2*mpcWindow, 1);
+    for(int i = 0; i<2*(mpcWindow+1); i++)
     {
-        int posQ=i%4;
+        int posQ=i%2;
         float value = Qx_ref(posQ,0);
         gradient(i,0) = value;
     }
 }
-void SpecificWorker::castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 4, 4> &dynamicMatrix, const Eigen::Matrix<double, 4, 2> &controlMatrix,
+void SpecificWorker::castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 2, 2> &dynamicMatrix, const Eigen::Matrix<double, 2, 2> &controlMatrix,
                                                  int mpcWindow, Eigen::SparseMatrix<double> &constraintMatrix)
 {
-    constraintMatrix.resize(4*(mpcWindow+1)  + 4*(mpcWindow+1) + 2 * mpcWindow, 4*(mpcWindow+1) + 2 * mpcWindow);
+    constraintMatrix.resize(2*(mpcWindow+1)  + 2*(mpcWindow+1) + 2 * mpcWindow, 2*(mpcWindow+1) + 2 * mpcWindow);
 
     // populate linear constraint matrix
-    for(int i = 0; i<4*(mpcWindow+1); i++)
+    for(int i = 0; i<2*(mpcWindow+1); i++)
     {
         constraintMatrix.insert(i,i) = -1;
     }
 
     for(int i = 0; i < mpcWindow; i++)
-        for(int j = 0; j<4; j++)
-            for(int k = 0; k<4; k++){
+        for(int j = 0; j<2; j++)
+            for(int k = 0; k<2; k++){
                 float value = dynamicMatrix(j,k);
                 if(value != 0){
-                    constraintMatrix.insert(4 * (i+1) + j, 4 * i + k) = value;
+                    constraintMatrix.insert(2 * (i+1) + j, 2 * i + k) = value;
                 }
             }
 
     for(int i = 0; i < mpcWindow; i++)
-        for(int j = 0; j < 4; j++)
+        for(int j = 0; j < 2; j++)
             for(int k = 0; k < 2; k++){
                 float value = controlMatrix(j,k);
                 if(value != 0){
-                    constraintMatrix.insert(4*(i+1)+j, 2*i+k+4*(mpcWindow + 1)) = value;
+                    constraintMatrix.insert(2*(i+1)+j, 2*i+k+2*(mpcWindow + 1)) = value;
                 }
             }
 
-    for(int i = 0; i<4*(mpcWindow+1) + 2*mpcWindow; i++){
-        constraintMatrix.insert(i+(mpcWindow+1)*4,i) = 1;
+    for(int i = 0; i<2*(mpcWindow+1) + 2*mpcWindow; i++){
+        constraintMatrix.insert(i+(mpcWindow+1)*2,i) = 1;
     }
 }
 
-void SpecificWorker::castMPCToQPConstraintVectors(const Eigen::Matrix<double, 4, 1> &xMax, const Eigen::Matrix<double, 4, 1> &xMin,
+void SpecificWorker::castMPCToQPConstraintVectors(const Eigen::Matrix<double, 2, 1> &xMax, const Eigen::Matrix<double, 2, 1> &xMin,
                                   const Eigen::Matrix<double, 2, 1> &uMax, const Eigen::Matrix<double, 2, 1> &uMin,
-                                  const Eigen::Matrix<double, 4, 1> &x0,
+                                  const Eigen::Matrix<double, 2, 1> &x0,
                                   int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
 {
     // evaluate the lower and the upper inequality vectors
-    Eigen::VectorXd lowerInequality = Eigen::MatrixXd::Zero(4*(mpcWindow+1) +  2 * mpcWindow, 1);
-    Eigen::VectorXd upperInequality = Eigen::MatrixXd::Zero(4*(mpcWindow+1) +  2 * mpcWindow, 1);
+    Eigen::VectorXd lowerInequality = Eigen::MatrixXd::Zero(2*(mpcWindow+1) +  2 * mpcWindow, 1);
+    Eigen::VectorXd upperInequality = Eigen::MatrixXd::Zero(2*(mpcWindow+1) +  2 * mpcWindow, 1);
     for(int i=0; i<mpcWindow+1; i++){
-        lowerInequality.block(4*i,0,4,1) = xMin;
-        upperInequality.block(4*i,0,4,1) = xMax;
+        lowerInequality.block(2*i,0,2,1) = xMin;
+        upperInequality.block(2*i,0,2,1) = xMax;
     }
     for(int i=0; i<mpcWindow; i++){
-        lowerInequality.block(2 * i + 4 * (mpcWindow + 1), 0, 2, 1) = uMin;
-        upperInequality.block(2 * i + 4 * (mpcWindow + 1), 0, 2, 1) = uMax;
+        lowerInequality.block(2 * i + 2 * (mpcWindow + 1), 0, 2, 1) = uMin;
+        upperInequality.block(2 * i + 2 * (mpcWindow + 1), 0, 2, 1) = uMax;
     }
 
     // evaluate the lower and the upper equality vectors
-    Eigen::VectorXd lowerEquality = Eigen::MatrixXd::Zero(4*(mpcWindow+1),1 );
+    Eigen::VectorXd lowerEquality = Eigen::MatrixXd::Zero(2*(mpcWindow+1),1 );
     Eigen::VectorXd upperEquality;
-    lowerEquality.block(0,0,4,1) = -x0;
+    lowerEquality.block(0,0,2,1) = -x0;
     upperEquality = lowerEquality;
     lowerEquality = lowerEquality;
 
     // merge inequality and equality vectors
-    lowerBound = Eigen::MatrixXd::Zero(2*4*(mpcWindow+1) +  2*mpcWindow,1 );
+    lowerBound = Eigen::MatrixXd::Zero(2*2*(mpcWindow+1) +  2*mpcWindow,1 );
     lowerBound << lowerEquality,
             lowerInequality;
 
-    upperBound = Eigen::MatrixXd::Zero(2*4*(mpcWindow+1) +  2*mpcWindow,1 );
+    upperBound = Eigen::MatrixXd::Zero(2*2*(mpcWindow+1) +  2*mpcWindow,1 );
     upperBound << upperEquality,
             upperInequality;
 }
 
 
-void SpecificWorker::updateConstraintVectors(const Eigen::Matrix<double, 4, 1> &x0,
+void SpecificWorker::updateConstraintVectors(const Eigen::Matrix<double, 2, 1> &x0,
                                              Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
 {
-    lowerBound.block(0,0,4,1) = -x0;
-    upperBound.block(0,0,4,1) = -x0;
+    lowerBound.block(0,0,2,1) = -x0;
+    upperBound.block(0,0,2,1) = -x0;
 }
 
-double SpecificWorker::getErrorNorm(const Eigen::Matrix<double, 4, 1> &x,
-                    const Eigen::Matrix<double, 4, 1> &xRef)
+double SpecificWorker::getErrorNorm(const Eigen::Matrix<double, 2, 1> &x, const Eigen::Matrix<double, 2, 1> &xRef)
 {
     // evaluate the error
-    Eigen::Matrix<double, 4, 1> error = x - xRef;
+    Eigen::Matrix<double, 2, 1> error = x - xRef;
     // return the norm
     return error.norm();
 }

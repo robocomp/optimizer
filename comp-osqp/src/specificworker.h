@@ -60,9 +60,7 @@ private:
     bool startup_check_flag;
 
     QPolygonF draw_laser(const RoboCompLaser::TLaserData &ldata);
-
     QPolygonF read_laser();
-
     RoboCompGenericBase::TBaseState read_base();
 
     // robot
@@ -84,28 +82,27 @@ private:
     QGraphicsItem *robot_polygon = nullptr;
     QGraphicsItem *laser_polygon = nullptr;
     const float ROBOT_LENGTH = 400;
-
     void fill_grid(const QPolygonF &ldata);
 
     // optimizer
-    std::optional<Eigen::Matrix<double, 4, 1>> init_optmizer();
+    std::optional<Eigen::Matrix<double, 2, 1>> init_optmizer();
 
-    void setInequalityConstraints(Eigen::Matrix<double, 4, 1> &xMax, Eigen::Matrix<double, 4, 1> &xMin,
+    void setInequalityConstraints(Eigen::Matrix<double, 2, 1> &xMax, Eigen::Matrix<double, 2, 1> &xMin,
                              Eigen::Matrix<double, 2, 1> &uMax, Eigen::Matrix<double, 2, 1> &uMin);
-    void setDynamicsMatrices(Eigen::Matrix<double, 4, 4> &A, Eigen::Matrix<double, 4, 2> &B);
-    void setWeightMatrices(Eigen::DiagonalMatrix<double, 4> &Q, Eigen::DiagonalMatrix<double, 2> &R);
-    void castMPCToQPHessian(const Eigen::DiagonalMatrix<double, 4> &Q, const Eigen::DiagonalMatrix<double, 2> &R,
+    void setDynamicsMatrices(Eigen::Matrix<double, 2, 2> &A, Eigen::Matrix<double, 2, 2> &B);
+    void setWeightMatrices(Eigen::DiagonalMatrix<double, 2> &Q, Eigen::DiagonalMatrix<double, 2> &R);
+    void castMPCToQPHessian(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::DiagonalMatrix<double, 2> &R,
                             int mpcWindow, Eigen::SparseMatrix<double> &hessianMatrix);
-    void castMPCToQPGradient(const Eigen::DiagonalMatrix<double, 4> &Q, const Eigen::Matrix<double, 4, 1> &xRef, int mpcWindow, Eigen::VectorXd &gradient);
-    void updateConstraintVectors(const Eigen::Matrix<double, 4, 1> &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
-    void castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 4, 4> &dynamicMatrix,
-                                     const Eigen::Matrix<double, 4, 2> &controlMatrix,
+    void castMPCToQPGradient(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::Matrix<double, 2, 1> &xRef, int mpcWindow, Eigen::VectorXd &gradient);
+    void updateConstraintVectors(const Eigen::Matrix<double, 2, 1> &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
+    void castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 2, 2> &dynamicMatrix,
+                                     const Eigen::Matrix<double, 2, 2> &controlMatrix,
                                      int mpcWindow, Eigen::SparseMatrix<double> &constraintMatrix);
-    void castMPCToQPConstraintVectors(const Eigen::Matrix<double, 4, 1> &xMax, const Eigen::Matrix<double, 4, 1> &xMin,
+    void castMPCToQPConstraintVectors(const Eigen::Matrix<double, 2, 1> &xMax, const Eigen::Matrix<double, 2, 1> &xMin,
                                       const Eigen::Matrix<double, 2, 1> &uMax, const Eigen::Matrix<double, 2, 1> &uMin,
-                                      const Eigen::Matrix<double, 4, 1> &x0,
+                                      const Eigen::Matrix<double, 2, 1> &x0,
                                       int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
-    double getErrorNorm(const Eigen::Matrix<double, 4, 1> &x, const Eigen::Matrix<double, 4, 1> &xRef);
+    double getErrorNorm(const Eigen::Matrix<double, 2, 1> &x, const Eigen::Matrix<double, 2, 1> &xRef);
 };
 
 #endif
