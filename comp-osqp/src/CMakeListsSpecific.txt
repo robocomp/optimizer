@@ -12,13 +12,15 @@ SET ( HEADERS
   specificmonitor.h
 )
 
+# Find OSQP library and headers
+#find_package(osqp REQUIRED)
+find_package(OsqpEigen)
+find_package(Eigen3)
 
 set(CMAKE_CXX_STANDARD 20)
 
 include_directories($ENV{GUROBI_HOME}/include/)
 
-link_directories($ENV{GUROBI_HOME}/lib/)
-
-SET (LIBS ${LIBS} gurobi_c++ gurobi91)
+SET (LIBS ${LIBS} OsqpEigen::OsqpEigen)
 
 
