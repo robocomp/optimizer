@@ -82,10 +82,10 @@ void SpecificWorker::initialize(int period)
     robot_polygon->setPos(0,0);
 
     // target
-    target = QPointF(0, 2200);
+    target = QPointF(500, 2200);
 
     // path
-    for(auto i : iter::range(0, 2200, 100))
+    for(auto i : iter::range(0, 2300, 100))
         path.emplace_back(QPointF(100 - qrand()%200, i));
     draw_path();
 
@@ -125,8 +125,10 @@ void SpecificWorker::initialize_model()
         ostringstream vnamex, vnamey;
         vnamex << "x" << e;
         model_vars[e*2].set(GRB_StringAttr_VarName, vnamex.str());
+        model_vars[e*2].set(GRB_DoubleAttr_Start, path[e].x());
         vnamey << "y" << e;
         model_vars[e*2+1].set(GRB_StringAttr_VarName, vnamey.str());
+        model_vars[e*2+1].set(GRB_DoubleAttr_Start, path[e].y());
     }
     for (uint e = np; e < 2*np; e++)
     {
@@ -137,14 +139,25 @@ void SpecificWorker::initialize_model()
         model_vars[e*2+1].set(GRB_StringAttr_VarName, vnamev.str());
     }
 
-    GRBQuadExpr fpoint, lpoint;
-    fpoint = model_vars[0]*model_vars[0];
-    fpoint += model_vars[1]*model_vars[1];
-    lpoint = (model_vars[(np-1)*2]-0)*(model_vars[(np-1)*2]-0);
-    lpoint +=(model_vars[(np-1)*2+1]-2200.)*(model_vars[(np-1)*2+1]-2200.);
+    model->addConstr(model_vars[0] == 0, "c0x");
+    model->addConstr(model_vars[1] == 0, "c0y");
+    model->addConstr(model_vars[(np-1)*2] == target.x(), "c1x");
+    model->addConstr(model_vars[(np-1)*2+1] == target.y(), "c1y");
 
-    model->addQConstr(fpoint <= 0.00001, "c0");
-    model->addQConstr(lpoint <= 0.00001, "c1");
+
+    for (uint e = 0; e < np-1; e++)
+    {
+        ostringstream vnamecx, vnamecy;
+        vnamecx << "cx" << e+2;
+        GRBLinExpr le, re;
+        le = model_vars[e*2] + model_vars[e*2+2*np];
+        re = model_vars[(e+1)*2];
+        model->addConstr( le == re, vnamecx.str());
+        vnamecy << "cy" << e+2;
+        le = model_vars[e*2+1] + model_vars[e*2+2*np+1];
+        re = model_vars[(e+1)*2+1];
+        model->addConstr(le == re, vnamecy.str());
+    }
 
     GRBQuadExpr obj;
     obj = 0;
@@ -153,9 +166,21 @@ void SpecificWorker::initialize_model()
         obj += (model_vars[e*2]-model_vars[(e+1)*2])*(model_vars[e*2]-model_vars[(e+1)*2]);
         obj += (model_vars[e*2+1]-model_vars[(e+1)*2+1])*(model_vars[e*2+1]-model_vars[(e+1)*2+1]);
     }
+
     model->setObjective(obj, GRB_MINIMIZE);
     model->optimize();
 
+    cout << "before optimizing" << endl;
+    for(uint e = 0; e < np; e++)
+    {
+        float x = model_vars[e*2].get(GRB_DoubleAttr_Start);
+        cout << model_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
+        float y = model_vars[e*2+1].get(GRB_DoubleAttr_Start);
+        cout << model_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
+    
+    }
+
+    cout << "after optimizing" << endl;
     path.clear();
     for(uint e = 0; e < np; e++)
     {
@@ -166,6 +191,15 @@ void SpecificWorker::initialize_model()
         cout << model_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
          << y << endl;
         path.emplace_back(QPointF(x, y));
+    }
+    for(uint e = np; e < 2*np; e++)
+    {
+        float x = model_vars[e*2].get(GRB_DoubleAttr_X);
+        cout << model_vars[e*2].get(GRB_StringAttr_VarName) << " "
+         << x << endl;
+        float y = model_vars[e*2+1].get(GRB_DoubleAttr_X);
+        cout << model_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+         << y << endl;
     }
 }
 void SpecificWorker::optimize()
