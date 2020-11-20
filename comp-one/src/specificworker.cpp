@@ -118,53 +118,86 @@ void SpecificWorker::initialize_model()
     model->set(GRB_StringAttr_ModelName, "path_optimization");
 
     uint np = path.size();
-    model_vars = model->addVars(4*np, GRB_CONTINUOUS);
+    model_vars = model->addVars(6*np, GRB_CONTINUOUS);
+    pose_vars = &(model_vars[0]);
+    vel_vars = &(model_vars[2*np]);
+    sin_cos_vars = &(model_vars[4*np]);
     
     for (uint e = 0; e < np; e++)
     {
         ostringstream vnamex, vnamey;
         vnamex << "x" << e;
-        model_vars[e*2].set(GRB_StringAttr_VarName, vnamex.str());
-        model_vars[e*2].set(GRB_DoubleAttr_Start, path[e].x());
+        pose_vars[e*2].set(GRB_StringAttr_VarName, vnamex.str());
+//        pose_vars[e*2].set(GRB_DoubleAttr_Start, path[e].x());
         vnamey << "y" << e;
-        model_vars[e*2+1].set(GRB_StringAttr_VarName, vnamey.str());
-        model_vars[e*2+1].set(GRB_DoubleAttr_Start, path[e].y());
+        pose_vars[e*2+1].set(GRB_StringAttr_VarName, vnamey.str());
+//        pose_vars[e*2+1].set(GRB_DoubleAttr_Start, path[e].y());
     }
-    for (uint e = np; e < 2*np; e++)
+    for (uint e = 0; e < np; e++)
     {
-        ostringstream vnameu, vnamev;
-        vnameu << "u" << e-path.size();
-        model_vars[e*2].set(GRB_StringAttr_VarName, vnameu.str());
-        vnamev << "v" << e-path.size();
-        model_vars[e*2+1].set(GRB_StringAttr_VarName, vnamev.str());
+        ostringstream vnameu, vnamev, vnamesin, vnamecos;
+        vnameu << "u" << e;
+        vel_vars[e*2].set(GRB_StringAttr_VarName, vnameu.str());
+        vnamev << "v" << e;
+        vel_vars[e*2+1].set(GRB_StringAttr_VarName, vnamev.str());
+        vnamesin << "sin_v" << e;
+        sin_cos_vars[e*2].set(GRB_StringAttr_VarName, vnamesin.str());
+        vnamecos << "cos_v" << e;
+        sin_cos_vars[e*2+1].set(GRB_StringAttr_VarName, vnamecos.str());
+
     }
 
-    model->addConstr(model_vars[0] == 0, "c0x");
-    model->addConstr(model_vars[1] == 0, "c0y");
-    model->addConstr(model_vars[(np-1)*2] == target.x(), "c1x");
-    model->addConstr(model_vars[(np-1)*2+1] == target.y(), "c1y");
+    model->addConstr(pose_vars[0] == 0, "c0x");
+    model->addConstr(pose_vars[1] == 0, "c0y");
+    model->addConstr(pose_vars[(np-1)*2] == target.x(), "c1x");
+    model->addConstr(pose_vars[(np-1)*2+1] == target.y(), "c1y");
 
 
     for (uint e = 0; e < np-1; e++)
     {
         ostringstream vnamecx, vnamecy;
-        vnamecx << "cx" << e+2;
         GRBLinExpr le, re;
-        le = model_vars[e*2] + model_vars[e*2+2*np];
-        re = model_vars[(e+1)*2];
+
+        vnamecx << "cx" << e+2;
+        le = pose_vars[e*2] + vel_vars[e*2];
+        re = pose_vars[(e+1)*2];
         model->addConstr( le == re, vnamecx.str());
+        
         vnamecy << "cy" << e+2;
-        le = model_vars[e*2+1] + model_vars[e*2+2*np+1];
-        re = model_vars[(e+1)*2+1];
+        le = pose_vars[e*2+1] + vel_vars[e*2+1];        
+        re = pose_vars[(e+1)*2+1];
         model->addConstr(le == re, vnamecy.str());
     }
+
+    // for (uint e = 0; e < np-1; e++)
+    // {
+    //     ostringstream vnamecx, vnamecy, vnamecsin, vnameccos;
+    //     GRBQuadExpr le, re;
+
+    //     vnamecx << "cx" << e+2;
+    //     le = pose_vars[e*2] + vel_vars[e*2]*sin_cos_vars[e*2+1];
+    //     re = pose_vars[(e+1)*2];
+    //     model->addQConstr( le == re, vnamecx.str());
+        
+    //     vnamecy << "cy" << e+2;
+    //     le = pose_vars[e*2+1] + vel_vars[e*2]*sin_cos_vars[e*2];        
+    //     re = pose_vars[(e+1)*2+1];
+    //     model->addQConstr(le == re, vnamecy.str());
+
+    //     // vnamecsin << "csin" << e+2;
+    //     // model->addGenConstrSin(vel_vars[e*2+1], sin_cos_vars[e*2], vnamecsin.str());
+    //     // vnameccos << "ccos" << e+2;
+    //     // model->addGenConstrCos(vel_vars[e*2+1], sin_cos_vars[e*2+1], vnameccos.str());
+
+
+    // }
 
     GRBQuadExpr obj;
     obj = 0;
     for (uint e = 0; e < np-1; e++)
     {
-        obj += (model_vars[e*2]-model_vars[(e+1)*2])*(model_vars[e*2]-model_vars[(e+1)*2]);
-        obj += (model_vars[e*2+1]-model_vars[(e+1)*2+1])*(model_vars[e*2+1]-model_vars[(e+1)*2+1]);
+        obj += (pose_vars[e*2]-pose_vars[(e+1)*2])*(pose_vars[e*2]-pose_vars[(e+1)*2]);
+        obj += (pose_vars[e*2+1]-pose_vars[(e+1)*2+1])*(pose_vars[e*2+1]-pose_vars[(e+1)*2+1]);
     }
 
     model->setObjective(obj, GRB_MINIMIZE);
@@ -173,10 +206,10 @@ void SpecificWorker::initialize_model()
     cout << "before optimizing" << endl;
     for(uint e = 0; e < np; e++)
     {
-        float x = model_vars[e*2].get(GRB_DoubleAttr_Start);
-        cout << model_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
-        float y = model_vars[e*2+1].get(GRB_DoubleAttr_Start);
-        cout << model_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
+        float x = pose_vars[e*2].get(GRB_DoubleAttr_Start);
+        cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
+        float y = pose_vars[e*2+1].get(GRB_DoubleAttr_Start);
+        cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
     
     }
 
@@ -184,21 +217,21 @@ void SpecificWorker::initialize_model()
     path.clear();
     for(uint e = 0; e < np; e++)
     {
-        float x = model_vars[e*2].get(GRB_DoubleAttr_X);
-        cout << model_vars[e*2].get(GRB_StringAttr_VarName) << " "
+        float x = pose_vars[e*2].get(GRB_DoubleAttr_X);
+        cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " "
          << x << endl;
-        float y = model_vars[e*2+1].get(GRB_DoubleAttr_X);
-        cout << model_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+        float y = pose_vars[e*2+1].get(GRB_DoubleAttr_X);
+        cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
          << y << endl;
         path.emplace_back(QPointF(x, y));
     }
-    for(uint e = np; e < 2*np; e++)
+    for(uint e = 0; e < np; e++)
     {
-        float x = model_vars[e*2].get(GRB_DoubleAttr_X);
-        cout << model_vars[e*2].get(GRB_StringAttr_VarName) << " "
+        float x = vel_vars[e*2].get(GRB_DoubleAttr_X);
+        cout << vel_vars[e*2].get(GRB_StringAttr_VarName) << " "
          << x << endl;
-        float y = model_vars[e*2+1].get(GRB_DoubleAttr_X);
-        cout << model_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+        float y = vel_vars[e*2+1].get(GRB_DoubleAttr_X);
+        cout << vel_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
          << y << endl;
     }
 }
