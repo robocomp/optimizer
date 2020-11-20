@@ -78,6 +78,10 @@ private:
 	GRBEnv *env;
 	GRBModel *model;
 	GRBVar *model_vars;
+	GRBVar *pose_vars;
+	GRBVar *vel_vars;
+	GRBVar *sin_cos_vars;
+
 
     const float ROBOT_LENGTH = 400;
 	void initialize_model();
