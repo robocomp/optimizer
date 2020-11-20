@@ -125,7 +125,7 @@ class Grid
         std::vector<QGraphicsRectItem *> scene_grid_points;
         std::list<QPointF> orderPath(const std::vector<std::pair<std::uint32_t, Key>> &previous, const Key &source, const Key &target);
         inline double heuristicL2(const Key &a, const Key &b) const;
-        const QString free_color = "#FFFF00";
+        const QString free_color = "LightYellow";
         const QString occupied_color = "#0000FF";
 };
 

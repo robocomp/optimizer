@@ -21,6 +21,6 @@ set(CMAKE_CXX_STANDARD 20)
 
 include_directories($ENV{GUROBI_HOME}/include/)
 
-SET (LIBS ${LIBS} OsqpEigen::OsqpEigen)
+SET (LIBS ${LIBS} OsqpEigen::OsqpEigen Qt5Charts)
 
 

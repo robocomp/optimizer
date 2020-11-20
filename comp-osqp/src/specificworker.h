@@ -35,17 +35,24 @@
 #include "grid.h"
 #include "OsqpEigen/OsqpEigen.h"
 #include <Eigen/Dense>
+#include <doublebuffer/DoubleBuffer.h>
+#include <QtCharts/QChart>
+#include <QtCharts/QChartView>
+#include <QtCharts/QLineSeries>
+#include <QtCharts/QAbstractAxis>
+#include <QtCharts/QSplineSeries>
+#include <QtCharts/QValueAxis>
+
+using namespace QtCharts;
 
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
 public:
     SpecificWorker(TuplePrx tprx, bool startup_check);
-
     ~SpecificWorker();
-
     bool setParams(RoboCompCommonBehavior::ParameterList params);
-
+    void RCISMousePicker_setPick (RoboCompRCISMousePicker::Pick myPick);
 
 public slots:
 
@@ -68,11 +75,13 @@ private:
 
     // target
     QPointF target;
+    DoubleBuffer<RoboCompRCISMousePicker::Pick, RoboCompRCISMousePicker::Pick> target_buffer;
 
     // path
     std::vector<QPointF> path;
     std::vector<QGraphicsEllipseItem *> path_paint;
     QString path_color = "#FF00FF";
+    bool atTarget = true;
 
     void draw_path();
 
@@ -84,9 +93,43 @@ private:
     const float ROBOT_LENGTH = 400;
     void fill_grid(const QPolygonF &ldata);
 
-    // optimizer
-    std::optional<Eigen::Matrix<double, 2, 1>> init_optmizer();
+    // Draw
+    QChart chart;
+    QChartView chartview;
+    QLineSeries series_x, series_y;
 
+    // optimizer
+    OsqpEigen::Solver solver;
+    // controller input and QPSolution vector
+    Eigen::Vector2d ctr;
+    Eigen::VectorXd QPSolution;
+    int mpcWindow = 20;
+    // allocate the dynamics matrices
+    Eigen::Matrix<double, 2, 2> A;
+    Eigen::Matrix<double, 2, 2> B;
+
+    // allocate the constraints vector
+    Eigen::Matrix<double, 2, 1> xMax;
+    Eigen::Matrix<double, 2, 1> xMin;
+    Eigen::Matrix<double, 2, 1> uMax;
+    Eigen::Matrix<double, 2, 1> uMin;
+
+    // allocate the weight matrices
+    Eigen::DiagonalMatrix<double, 2> Q;
+    Eigen::DiagonalMatrix<double, 2> R;
+
+    // allocate the initial and the reference state space
+    Eigen::Matrix<double, 2, 1> x0;
+    Eigen::Matrix<double, 2, 1> xRef;
+
+    // allocate QP problem matrices and vectors
+    Eigen::SparseMatrix<double> hessian;
+    Eigen::VectorXd gradient;
+    Eigen::SparseMatrix<double> linearMatrix;
+    Eigen::VectorXd lowerBound;
+    Eigen::VectorXd upperBound;
+
+    std::optional<Eigen::Matrix<double, 2, 1>> init_optmizer();
     void setInequalityConstraints(Eigen::Matrix<double, 2, 1> &xMax, Eigen::Matrix<double, 2, 1> &xMin,
                              Eigen::Matrix<double, 2, 1> &uMax, Eigen::Matrix<double, 2, 1> &uMin);
     void setDynamicsMatrices(Eigen::Matrix<double, 2, 2> &A, Eigen::Matrix<double, 2, 2> &B);
@@ -103,6 +146,9 @@ private:
                                       const Eigen::Matrix<double, 2, 1> &x0,
                                       int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
     double getErrorNorm(const Eigen::Matrix<double, 2, 1> &x, const Eigen::Matrix<double, 2, 1> &xRef);
+
+
+
 };
 
 #endif

@@ -18,13 +18,14 @@
  */
 #include "specificworker.h"
 #include <cppitertools/range.hpp>
+#include <cppitertools/enumerate.hpp>
 
 /**
 * \brief Default constructor
 */
 SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorker(tprx)
 {
-	this->startup_check_flag = startup_check;
+    this->startup_check_flag = startup_check;
 }
 
 /**
@@ -32,38 +33,50 @@ SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorke
 */
 SpecificWorker::~SpecificWorker()
 {
-	std::cout << "Destroying SpecificWorker" << std::endl;
+    std::cout << "Destroying SpecificWorker" << std::endl;
 }
 
 bool SpecificWorker::setParams(RoboCompCommonBehavior::ParameterList params)
 {
-	try
-	{
-		RoboCompCommonBehavior::Parameter par = params.at("InnerModelPath");
-		std::string innermodel_path = par.value;
-		innerModel = std::make_shared<InnerModel>(innermodel_path);
+    try
+    {
+        RoboCompCommonBehavior::Parameter par = params.at("InnerModelPath");
+        std::string innermodel_path = par.value;
+        innerModel = std::make_shared<InnerModel>(innermodel_path);
 
-	}
-	catch(const std::exception &e) { qFatal("Error reading config params"); }
-	return true;
+    }
+    catch(const std::exception &e) { qFatal("Error reading config params"); }
+    return true;
 }
 
 void SpecificWorker::initialize(int period)
 {
-	std::cout << "Initialize worker" << std::endl;
+    std::cout << "Initialize worker" << std::endl;
 
-	//grid
-	Grid<>::Dimensions dim;  //default values
-	grid.initialize(&scene, dim);
+    //grid
+    Grid<>::Dimensions dim;  //default values
+    grid.initialize(&scene, dim);
 
-	//view
+    //view
     graphicsView->setScene(&scene);
-	graphicsView->setMinimumSize(400,400);
+    graphicsView->setMinimumSize(400,400);
     scene.setItemIndexMethod(QGraphicsScene::NoIndex);
     scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
     graphicsView->scale(1, -1);
     graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
     graphicsView->show();
+
+    //Draw
+    chart.legend()->hide();
+
+
+    //chart.createDefaultAxes();
+    chart.setAnimationOptions(QChart::SeriesAnimations);
+    chartview.setChart(&chart);
+    chartview.setRenderHint(QPainter::Antialiasing);
+    chartview.setParent(this->signal_frame);
+    chartview.resize(signal_frame->size());
+    chartview.show();
 
     //robot
     QPolygonF poly2;
@@ -81,74 +94,83 @@ void SpecificWorker::initialize(int period)
     robot_polygon->setZValue(5);
     robot_polygon->setPos(0,0);
 
-    // target
-    target = QPointF(0, 2200);
+    init_optmizer();
 
-    // path
-//    for(auto i : iter::range(0, 2200, 100))
-//        path.emplace_back(QPointF((100 - qrand()%200), i));
-//    draw_path();
-
-    if( auto res = init_optmizer(); res.has_value())
-    {
-        qInfo() << "------res---------";
-        std::cout << res.value() << std::endl;
-    }
+    this->Period = period;
+    if(this->startup_check_flag)
+        this->startup_check();
     else
-    {
-        std::cout << "ERROR" << std::endl;
-    }
-
-
-	this->Period = period;
-	if(this->startup_check_flag)
-		this->startup_check();
-	else
-		timer.start(Period);
+        timer.start(Period);
 }
 
 void SpecificWorker::compute()
 {
+    static RoboCompRCISMousePicker::Pick target;
+    static std::vector<QPointF> control_vector;
     auto bState = read_base();
     auto laser_poly = read_laser();
-    fill_grid(laser_poly);
-    auto [x,z,alpha] = state_change(bState, 0.1);  //secs
+    //fill_grid(laser_poly);
+    //auto [x,z,alpha] = state_change(bState, 0.1);  //secs
     //qInfo() << bState.x << bState.z << bState.alpha << "--" << x << z << alpha;
+
+    // check for new target
+    if(auto t = target_buffer.try_get(); t.has_value())
+    {
+        xRef << t.value().x, t.value().z;
+        castMPCToQPGradient(Q, xRef, mpcWindow, gradient);
+        if (!solver.updateGradient(gradient)) return ;
+    }
+    if( not atTarget)
+    {
+        x0 << bState.x, bState.z;
+        double err = getErrorNorm(x0, xRef);
+        std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
+        if (err < 10)
+        {
+            std::cout << "FINISH" << std::endl;
+            atTarget = true;
+            control_vector.clear();
+        }
+
+        // solve the QP problem
+        solver.clearSolverVariables();
+        if (!solver.solve()) return;
+        QPSolution = solver.getSolution();
+        ctr = QPSolution.block(2 * (mpcWindow + 1), 0, 2, 1);
+
+        // update the constraint bound
+        updateConstraintVectors(x0, lowerBound, upperBound);
+        if (!solver.updateBounds(lowerBound, upperBound)) return;
+
+        // execute control
+        qInfo() << __FUNCTION__ << " Control: " << ctr.x() << ctr.y() << " Dist: " << err;
+        auto nose = innerModel->transform("base", QVec::vec3(QPSolution(5, 0), 0., QPSolution(6, 0)), "world");
+        float angle = atan2(nose.x(), nose.z());
+        omnirobot_proxy->setSpeedBase(ctr.x(), ctr.y(), 0,);
+
+        control_vector.push_back(QPointF(ctr.x(),ctr.y()));
+        for(int i=0; i<mpcWindow*2; i+=2)
+            path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
+
+        draw_path();
+        path.clear();
+
+//        chart.removeAllSeries();
+//        QSplineSeries *xs = new QSplineSeries();
+//        QSplineSeries *ys = new QSplineSeries();
+//        for(auto &&[i,c] : iter::enumerate(control_vector))
+//        {
+//            xs->append(i, c.x());
+//            ys->append(i, c.y());
+//        }
+//        chart.addSeries(xs);
+//        chart.addSeries(ys);
+//        chart.createDefaultAxes();
+    }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
 {
-    // set the preview window
-    int mpcWindow = 20;
-
-    // allocate the dynamics matrices
-    Eigen::Matrix<double, 2, 2> A;
-    Eigen::Matrix<double, 2, 2> B;
-
-    // allocate the constraints vector
-    Eigen::Matrix<double, 2, 1> xMax;
-    Eigen::Matrix<double, 2, 1> xMin;
-    Eigen::Matrix<double, 2, 1> uMax;
-    Eigen::Matrix<double, 2, 1> uMin;
-
-    // allocate the weight matrices
-    Eigen::DiagonalMatrix<double, 2> Q;
-    Eigen::DiagonalMatrix<double, 2> R;
-
-    // allocate the initial and the reference state space
-    Eigen::Matrix<double, 2, 1> x0;
-    Eigen::Matrix<double, 2, 1> xRef;
-
-    // allocate QP problem matrices and vectors
-    Eigen::SparseMatrix<double> hessian;
-    Eigen::VectorXd gradient;
-    Eigen::SparseMatrix<double> linearMatrix;
-    Eigen::VectorXd lowerBound;
-    Eigen::VectorXd upperBound;
-
-    // set the initial and the desired states
-    x0 << 0, 0;
-    xRef << -1000, -2200;
 
     // set MPC problem quantities
     setDynamicsMatrices(A, B);
@@ -161,8 +183,6 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
     castMPCToQPConstraintMatrix(A, B, mpcWindow, linearMatrix);
     castMPCToQPConstraintVectors(xMax, xMin, uMax, uMin, x0, mpcWindow, lowerBound, upperBound);
 
-    // instantiate the solver
-    OsqpEigen::Solver solver;
 
     // settings
     //solver.settings()->setVerbosity(false);
@@ -170,50 +190,17 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
 
     // set the initial data of the QP solver
     solver.data()->setNumberOfVariables(2 * (mpcWindow + 1) + 2 * mpcWindow);
-    solver.data()->setNumberOfConstraints(2 * 2 * (mpcWindow + 1) +  2 * mpcWindow);
-    if(!solver.data()->setHessianMatrix(hessian)) return {};
-    if(!solver.data()->setGradient(gradient)) return {};
-    if(!solver.data()->setLinearConstraintsMatrix(linearMatrix)) return {};
-    if(!solver.data()->setLowerBound(lowerBound)) return {};
-    if(!solver.data()->setUpperBound(upperBound)) return {};
+    solver.data()->setNumberOfConstraints(2 * 2 * (mpcWindow + 1) + 2 * mpcWindow);
+    if (!solver.data()->setHessianMatrix(hessian)) return {};
+    if (!solver.data()->setGradient(gradient)) return {};
+    if (!solver.data()->setLinearConstraintsMatrix(linearMatrix)) return {};
+    if (!solver.data()->setLowerBound(lowerBound)) return {};
+    if (!solver.data()->setUpperBound(upperBound)) return {};
 
     // instantiate the solver
-    if(!solver.initSolver()) return {};
-
-    // controller input and QPSolution vector
-    Eigen::Vector2d ctr;
-    Eigen::VectorXd QPSolution;
-
-    // number of iteration steps
-    int numberOfSteps = 50;
-
-    for (int i = 0; i < numberOfSteps; i++)
-    {
-
-        // solve the QP problem
-        if(!solver.solve()) return {};
-
-        // get the controller input
-        QPSolution = solver.getSolution();
-        ctr = QPSolution.block(2 * (mpcWindow + 1), 0, 2, 1);
-
-        // save data into file
-        //auto x0Data = x0.data();
-
-        // propagate the model
-        x0 = A * x0 + B * ctr;
-
-        double err = getErrorNorm(x0, xRef);
-        std::cout << "----------------- " << x0 << std::endl;
-        path.emplace_back(QPointF(x0.x(), x0.y()));
-        if(err < 5) break;
-
-        // update the constraint bound
-        updateConstraintVectors(x0, lowerBound, upperBound);
-        if(!solver.updateBounds(lowerBound, upperBound)) return {};
-    }
-    draw_path();
+    if (!solver.initSolver()) return {};
     return x0;
+
 }
 
 
@@ -233,10 +220,10 @@ void SpecificWorker::setInequalityConstraints(Eigen::Matrix<double, 2, 1> &xMax,
             2500;
     xMin << -2500,
             -2500;
-    uMax << 500,
-            500;
-    uMin << -500,
-            -500;
+    uMax << 600,
+            600;
+    uMin << -600,
+            -600;
 }
 void SpecificWorker::setWeightMatrices(Eigen::DiagonalMatrix<double, 2> &Q, Eigen::DiagonalMatrix<double, 2> &R)
 {
@@ -316,9 +303,9 @@ void SpecificWorker::castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 2, 
 }
 
 void SpecificWorker::castMPCToQPConstraintVectors(const Eigen::Matrix<double, 2, 1> &xMax, const Eigen::Matrix<double, 2, 1> &xMin,
-                                  const Eigen::Matrix<double, 2, 1> &uMax, const Eigen::Matrix<double, 2, 1> &uMin,
-                                  const Eigen::Matrix<double, 2, 1> &x0,
-                                  int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
+                                                  const Eigen::Matrix<double, 2, 1> &uMax, const Eigen::Matrix<double, 2, 1> &uMin,
+                                                  const Eigen::Matrix<double, 2, 1> &x0,
+                                                  int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
 {
     // evaluate the lower and the upper inequality vectors
     Eigen::VectorXd lowerInequality = Eigen::MatrixXd::Zero(2*(mpcWindow+1) +  2 * mpcWindow, 1);
@@ -371,7 +358,7 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     RoboCompGenericBase::TBaseState bState;
     try
     {
-        differentialrobot_proxy->getBaseState(bState);
+        omnirobot_proxy->getBaseState(bState);
         innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
         robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
@@ -452,10 +439,15 @@ void SpecificWorker::draw_path()
 ///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {
-	std::cout << "Startup check" << std::endl;
-	QTimer::singleShot(200, qApp, SLOT(quit()));
-	return 0;
+    std::cout << "Startup check" << std::endl;
+    QTimer::singleShot(200, qApp, SLOT(quit()));
+    return 0;
 }
-
-
+///////////////////////////////////////////////////////////////////////////////////////////////
+void SpecificWorker::RCISMousePicker_setPick (RoboCompRCISMousePicker::Pick myPick)
+{
+    target_buffer.put(myPick);
+    atTarget = false;
+    qInfo() << __FUNCTION__ << " New target";
+}
 

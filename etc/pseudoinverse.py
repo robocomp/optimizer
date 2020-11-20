@@ -6,7 +6,7 @@ init_printing(use_unicode=True)
 
 a, b, R = symbols('a b R')
 
-m = Matrix([[1, 1, a+b], [1, -1,-a-b], [1, -1, -a+b],[1, 1, a-b]])
+m = Matrix([[1, 1, a+b], [-1, 1,a+b], [-1, 1, -a-b],[1, 1, -a-b]])
 
 res =  ((m.T*m)/R)**-1 * m.T
 res.simplify()
