@@ -19,6 +19,7 @@
 #include "specificworker.h"
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
+#include <algorithm>
 
 /**
 * \brief Default constructor
@@ -65,12 +66,16 @@ void SpecificWorker::initialize(int period)
     graphicsView->scale(1, -1);
     graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
     graphicsView->show();
+    connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
+                    {
+                        qInfo() << "Lambda SLOT: " << e->scenePos();
+                        target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
+                        atTarget = false;
+                    });
 
     //Draw
     chart.legend()->hide();
 
-
-    //chart.createDefaultAxes();
     chart.setAnimationOptions(QChart::SeriesAnimations);
     chartview.setChart(&chart);
     chartview.setRenderHint(QPainter::Antialiasing);
@@ -105,10 +110,10 @@ void SpecificWorker::initialize(int period)
 
 void SpecificWorker::compute()
 {
-    static RoboCompRCISMousePicker::Pick target;
+    static Eigen::Vector2f target;
     static std::vector<QPointF> control_vector;
     auto bState = read_base();
-    auto laser_poly = read_laser();
+    //auto laser_poly = read_laser();
     //fill_grid(laser_poly);
     //auto [x,z,alpha] = state_change(bState, 0.1);  //secs
     //qInfo() << bState.x << bState.z << bState.alpha << "--" << x << z << alpha;
@@ -116,7 +121,7 @@ void SpecificWorker::compute()
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
     {
-        xRef << t.value().x, t.value().z;
+        xRef << t.value().x(), t.value().y();
         castMPCToQPGradient(Q, xRef, mpcWindow, gradient);
         if (!solver.updateGradient(gradient)) return ;
     }
@@ -124,48 +129,53 @@ void SpecificWorker::compute()
     {
         x0 << bState.x, bState.z;
         double err = getErrorNorm(x0, xRef);
-        std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
-        if (err < 10)
+        //std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
+        if (err < 50)
         {
+            omnirobot_proxy->setSpeedBase(0, 0, 0);
             std::cout << "FINISH" << std::endl;
             atTarget = true;
+            chart.removeAllSeries();
+            QSplineSeries *xs = new QSplineSeries();
+            QSplineSeries *ys = new QSplineSeries();
+            for(auto &&[i,c] : iter::enumerate(control_vector))
+            {   xs->append(i, c.x()); ys->append(i, c.y());    }
+            chart.addSeries(xs);
+            chart.addSeries(ys);
+            chart.createDefaultAxes();
             control_vector.clear();
+            return;
         }
 
         // solve the QP problem
         solver.clearSolverVariables();
-        if (!solver.solve()) return;
+        if (!solver.solve()) { qInfo() << "Out solve "; return;};
         QPSolution = solver.getSolution();
         ctr = QPSolution.block(2 * (mpcWindow + 1), 0, 2, 1);
+
+        // execute control
+        qInfo() << __FUNCTION__ << " Control: " << ctr.x() << ctr.y() << " Dist: " << err;
+        auto nose = innerModel->transform("base", QVec::vec3(QPSolution(1, 0), 0., QPSolution(1, 0)), "world");
+        float angle = atan2(nose.x(), nose.z());
+
+        control_vector.push_back(QPointF(ctr.x(),ctr.y()));
+        ctr = ctr / ViriatoBase_WheelRadius;
+        omnirobot_proxy->setSpeedBase(ctr.x(), ctr.y(), 0);
+//        auto control = (xRef - x0);
+//        qInfo() << xRef.x() << xRef.y() << x0.x() << x0.y() << control.x() << control.y();
+//        omnirobot_proxy->setSpeedBase(control.x()/ViriatoBase_WheelRadius, control.y()/ViriatoBase_WheelRadius, 0);
+
+        control_vector.push_back(QPointF(ctr.x(),ctr.y()));
+        std::vector<QPointF> path;
+        for(int i=0; i<mpcWindow*2; i+=2)
+            path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
+
+        draw_path(path);
 
         // update the constraint bound
         updateConstraintVectors(x0, lowerBound, upperBound);
         if (!solver.updateBounds(lowerBound, upperBound)) return;
 
-        // execute control
-        qInfo() << __FUNCTION__ << " Control: " << ctr.x() << ctr.y() << " Dist: " << err;
-        auto nose = innerModel->transform("base", QVec::vec3(QPSolution(5, 0), 0., QPSolution(6, 0)), "world");
-        float angle = atan2(nose.x(), nose.z());
-        omnirobot_proxy->setSpeedBase(ctr.x(), ctr.y(), 0,);
-
-        control_vector.push_back(QPointF(ctr.x(),ctr.y()));
-        for(int i=0; i<mpcWindow*2; i+=2)
-            path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
-
-        draw_path();
-        path.clear();
-
-//        chart.removeAllSeries();
-//        QSplineSeries *xs = new QSplineSeries();
-//        QSplineSeries *ys = new QSplineSeries();
-//        for(auto &&[i,c] : iter::enumerate(control_vector))
-//        {
-//            xs->append(i, c.x());
-//            ys->append(i, c.y());
-//        }
-//        chart.addSeries(xs);
-//        chart.addSeries(ys);
-//        chart.createDefaultAxes();
     }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -328,12 +338,10 @@ void SpecificWorker::castMPCToQPConstraintVectors(const Eigen::Matrix<double, 2,
 
     // merge inequality and equality vectors
     lowerBound = Eigen::MatrixXd::Zero(2*2*(mpcWindow+1) +  2*mpcWindow,1 );
-    lowerBound << lowerEquality,
-            lowerInequality;
+    lowerBound << lowerEquality, lowerInequality;
 
     upperBound = Eigen::MatrixXd::Zero(2*2*(mpcWindow+1) +  2*mpcWindow,1 );
-    upperBound << upperEquality,
-            upperInequality;
+    upperBound << upperEquality, upperInequality;
 }
 
 
@@ -427,7 +435,7 @@ QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
     return poly;
 }
 
-void SpecificWorker::draw_path()
+void SpecificWorker::draw_path( const std::vector<QPointF> &path)
 {
     for(auto p : path_paint)
         scene.removeItem(p);
@@ -444,10 +452,3 @@ int SpecificWorker::startup_check()
     return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////
-void SpecificWorker::RCISMousePicker_setPick (RoboCompRCISMousePicker::Pick myPick)
-{
-    target_buffer.put(myPick);
-    atTarget = false;
-    qInfo() << __FUNCTION__ << " New target";
-}
-

@@ -34,7 +34,6 @@
 #include <GenericBase.h>
 #include <Laser.h>
 #include <OmniRobot.h>
-#include <RCISMousePicker.h>
 
 
 #define CHECK_PERIOD 5000
@@ -60,7 +59,6 @@ public:
 	RoboCompLaser::LaserPrxPtr laser_proxy;
 	RoboCompOmniRobot::OmniRobotPrxPtr omnirobot_proxy;
 
-	virtual void RCISMousePicker_setPick (RoboCompRCISMousePicker::Pick myPick) = 0;
 
 protected:
 

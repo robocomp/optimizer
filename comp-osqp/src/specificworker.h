@@ -42,8 +42,21 @@
 #include <QtCharts/QAbstractAxis>
 #include <QtCharts/QSplineSeries>
 #include <QtCharts/QValueAxis>
+#include <QGraphicsSceneMouseEvent>
 
 using namespace QtCharts;
+
+
+class MyScene : public QGraphicsScene
+{
+    Q_OBJECT
+    signals:
+        void new_target(QGraphicsSceneMouseEvent *);
+protected:
+    void mousePressEvent(QGraphicsSceneMouseEvent *event)
+    { emit new_target(event); }
+};
+
 
 class SpecificWorker : public GenericWorker
 {
@@ -52,14 +65,11 @@ public:
     SpecificWorker(TuplePrx tprx, bool startup_check);
     ~SpecificWorker();
     bool setParams(RoboCompCommonBehavior::ParameterList params);
-    void RCISMousePicker_setPick (RoboCompRCISMousePicker::Pick myPick);
 
 public slots:
 
     void compute();
-
     int startup_check();
-
     void initialize(int period);
 
 private:
@@ -72,22 +82,23 @@ private:
 
     // robot
     std::tuple<float, float, float> state_change(const RoboCompGenericBase::TBaseState &bState, float delta_t);
+    const float ViriatoBase_WheelRadius = 76.2;
+    const float ViriatoBase_DistAxes = 380.f;
+    const float ViriatoBase_AxesLength = 422.f;
 
     // target
-    QPointF target;
-    DoubleBuffer<RoboCompRCISMousePicker::Pick, RoboCompRCISMousePicker::Pick> target_buffer;
+    DoubleBuffer<Eigen::Vector2f, Eigen::Vector2f> target_buffer;
 
     // path
-    std::vector<QPointF> path;
     std::vector<QGraphicsEllipseItem *> path_paint;
     QString path_color = "#FF00FF";
     bool atTarget = true;
 
-    void draw_path();
+    void draw_path(const std::vector<QPointF> &path);
 
     // Grid
     Grid<> grid;
-    QGraphicsScene scene;
+    MyScene scene;
     QGraphicsItem *robot_polygon = nullptr;
     QGraphicsItem *laser_polygon = nullptr;
     const float ROBOT_LENGTH = 400;
@@ -147,8 +158,7 @@ private:
                                       int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
     double getErrorNorm(const Eigen::Matrix<double, 2, 1> &x, const Eigen::Matrix<double, 2, 1> &xRef);
 
-
-
 };
+
 
 #endif

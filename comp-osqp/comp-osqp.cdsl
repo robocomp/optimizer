@@ -1,13 +1,11 @@
 import "OmniRobot.idsl";
 import "Laser.idsl";
-import "RCISMousePicker.idsl";
 
 Component composqp 
 {
     Communications
     {
         requires OmniRobot, Laser;
-        subscribesTo RCISMousePicker;
     };
     language Cpp11;
     gui Qt(QWidget);
