@@ -58,6 +58,12 @@ class SpecificWorker(GenericWorker):
         self.robot = YouBot()
         self.robot_object = Object("youBot")
 
+        #self.ViriatoBase_WheelRadius = 76.2  #mm real robot
+        self.ViriatoBase_WheelRadius = 44  # mm coppelia
+        self.ViriatoBase_DistAxes = 380.
+        self.ViriatoBase_AxesLength = 422.
+        self.ViriatoBase_Rotation_Factor = 8.1  # it should be (DistAxes + AxesLength) / 2
+
         # Each laser is composed of two cameras. They are converted into a 360 virtual laser
         self.hokuyo_base_front_left = VisionSensor("hokuyo_base_front_left")
         self.hokuyo_base_front_right = VisionSensor("hokuyo_base_front_right")
@@ -187,17 +193,28 @@ class SpecificWorker(GenericWorker):
         adv = 0.0
         rot = 0.0
         side = 0.0
-
+        #linear_vel, ang_vel = self.robot_object.get_velocity()
         for x in datos.axes:
             if x.name == "advance":
                 adv = x.value if np.abs(x.value) > 0.1 else 0
+                adv = adv / self.ViriatoBase_WheelRadius;
             if x.name == "rotate":
                 rot = x.value if np.abs(x.value) > 0.1 else 0
+                print(ang_vel[2], rot, ang_vel[2] - rot)
+                #rot = rot * ((self.ViriatoBase_DistAxes + self.ViriatoBase_AxesLength) / 2)
+                rot = rot * self.ViriatoBase_Rotation_Factor
             if x.name == "side":
                 side = x.value if np.abs(x.value) > 0.1 else 0
+                side = side / self.ViriatoBase_WheelRadius;
 
         #print("Joystick ", adv, rot, side)
-        self.robot.set_base_angular_velocites([adv, side, rot])
+        converted_speed = self.convert_base_speed_to_radians([adv, side, rot])
+
+        self.robot.set_base_angular_velocites(converted_speed)
+
+    def convert_base_speed_to_radians(self, unconverted_speeds):
+        return []
+
 
     ##################################################################################
     # SUBSCRIPTION to sendData method from JoystickAdapter interface
