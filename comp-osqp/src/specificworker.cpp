@@ -155,12 +155,17 @@ void SpecificWorker::compute()
 
         // execute control
         qInfo() << __FUNCTION__ << " Control: " << ctr.x() << ctr.y() << " Dist: " << err;
-        auto nose = innerModel->transform("base", QVec::vec3(QPSolution(1, 0), 0., QPSolution(1, 0)), "world");
+        auto nose = innerModel->transform("base", QVec::vec3(QPSolution(2, 0), 0., QPSolution(3, 0)), "world");
         float angle = atan2(nose.x(), nose.z());
 
         control_vector.push_back(QPointF(ctr.x(),ctr.y()));
+
+        // convert mm/sg into radians. Should be un omniroboPyrep
         ctr = ctr / ViriatoBase_WheelRadius;
-        omnirobot_proxy->setSpeedBase(ctr.x(), ctr.y(), 0);
+        auto ll = (ViriatoBase_DistAxes + ViriatoBase_AxesLength) / (2.f*1000.f);
+        auto crt_angle = std::clamp(angle, -1.f, 1.f);
+        omnirobot_proxy->setSpeedBase(ctr.x(), ctr.y()0);
+
 //        auto control = (xRef - x0);
 //        qInfo() << xRef.x() << xRef.y() << x0.x() << x0.y() << control.x() << control.y();
 //        omnirobot_proxy->setSpeedBase(control.x()/ViriatoBase_WheelRadius, control.y()/ViriatoBase_WheelRadius, 0);

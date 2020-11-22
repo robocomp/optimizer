@@ -23,57 +23,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="fcc88995-63e0-4d7e-ac97-5e523a7bcdb9" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/other.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/viriatoPyrep.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.vscode/settings.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CMakeCache.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/DoxyFile" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Makefile" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/README-RCNODE.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/config" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/etc/config" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/etc/config.new" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/run.sh" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/CMakeLists.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/CameraRGBDSimple.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/CameraRGBDSimplePub.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/CommonBehavior.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/CoppeliaUtils.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/GenericBase.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/HumanToDSRPub.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/JointMotor.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/JointMotorPub.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/JoystickAdapter.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/KinovaArmPub.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/Laser.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/LaserPub.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/OmniRobot.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/OmniRobotPub.ice" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/camerargbdsimpleI.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/circle.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/coppeliautilsI.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/genericworker.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/joystickadapterI.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/laserI.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/omnirobotI.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/specificworker.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/viriato.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/viriatoPyrep.cdsl.DONT_USE_QT_FREE" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../comp-osqp/comp-osqp.cdsl" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/comp-osqp.cdsl" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../comp-osqp/etc/config.new" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/etc/config.new" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../comp-osqp/src/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../comp-osqp/src/genericworker.h" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/genericworker.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../comp-osqp/src/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/main.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../comp-osqp/src/specificworker.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/specificworker.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../comp-osqp/src/specificworker.h" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/specificworker.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../etc/viriato_mpc.ttt" beforeDir="false" afterPath="$PROJECT_DIR$/../etc/viriato_mpc.ttt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/specificworker.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/specificworker.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -196,7 +149,7 @@
       <workItem from="1603023328060" duration="1291000" />
       <workItem from="1603096090593" duration="3385000" />
       <workItem from="1604221367135" duration="14184000" />
-      <workItem from="1605955494291" duration="8435000" />
+      <workItem from="1605955494291" duration="14949000" />
     </task>
     <servers />
   </component>

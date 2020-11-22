@@ -81,7 +81,7 @@ class SpecificWorker(GenericWorker):
         start = time.time()
         while True:
             self.pr.step()
-            #self.read_laser()
+            self.read_laser()
             self.read_joystick()
             self.read_robot_pose()
             self.move_robot()
