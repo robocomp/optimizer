@@ -36,16 +36,7 @@
 #include "OsqpEigen/OsqpEigen.h"
 #include <Eigen/Dense>
 #include <doublebuffer/DoubleBuffer.h>
-#include <QtCharts/QChart>
-#include <QtCharts/QChartView>
-#include <QtCharts/QLineSeries>
-#include <QtCharts/QAbstractAxis>
-#include <QtCharts/QSplineSeries>
-#include <QtCharts/QValueAxis>
-#include <QGraphicsSceneMouseEvent>
-
-using namespace QtCharts;
-
+#include "qcustomplot.h"
 
 class MyScene : public QGraphicsScene
 {
@@ -105,9 +96,9 @@ private:
     void fill_grid(const QPolygonF &ldata);
 
     // Draw
-    QChart chart;
-    QChartView chartview;
-    QLineSeries series_x, series_y;
+    QCustomPlot custom_plot;
+    QCPGraph *xGraph;
+    QSharedPointer<QCPAbstractPlottable1D<float>> xData;
 
     // optimizer
     OsqpEigen::Solver solver;

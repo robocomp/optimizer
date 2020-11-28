@@ -200,17 +200,17 @@ class SpecificWorker(GenericWorker):
                 adv = adv / self.ViriatoBase_WheelRadius;
             if x.name == "rotate":
                 rot = x.value if np.abs(x.value) > 0.1 else 0
-                print(ang_vel[2], rot, ang_vel[2] - rot)
+                #rint(ang_vel[2], rot, ang_vel[2] - rot)
                 #rot = rot * ((self.ViriatoBase_DistAxes + self.ViriatoBase_AxesLength) / 2)
                 rot = rot * self.ViriatoBase_Rotation_Factor
             if x.name == "side":
                 side = x.value if np.abs(x.value) > 0.1 else 0
                 side = side / self.ViriatoBase_WheelRadius;
 
-        #print("Joystick ", adv, rot, side)
-        converted_speed = self.convert_base_speed_to_radians([adv, side, rot])
+        print("Joystick ", adv, rot, side)
+        #converted_speed = self.convert_base_speed_to_radians([adv, side, rot])
 
-        self.robot.set_base_angular_velocites(converted_speed)
+        self.robot.set_base_angular_velocites([adv, side, rot])
 
     def convert_base_speed_to_radians(self, unconverted_speeds):
         return []

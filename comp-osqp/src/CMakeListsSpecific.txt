@@ -4,12 +4,14 @@ SET ( SOURCES
   specificworker.cpp
   specificmonitor.cpp
   grid.cpp
+  qcustomplot.cpp
 )
 
 # Headers set
 SET ( HEADERS
   specificworker.h
   specificmonitor.h
+  qcustomplot.h
 )
 
 # Find OSQP library and headers
@@ -21,6 +23,8 @@ set(CMAKE_CXX_STANDARD 20)
 
 include_directories($ENV{GUROBI_HOME}/include/)
 
-SET (LIBS ${LIBS} OsqpEigen::OsqpEigen Qt5Charts)
+find_package( Qt5PrintSupport )
+
+SET (LIBS ${LIBS} OsqpEigen::OsqpEigen Qt5::PrintSupport)
 
 

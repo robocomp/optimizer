@@ -74,14 +74,15 @@ void SpecificWorker::initialize(int period)
                     });
 
     //Draw
-    chart.legend()->hide();
-
-    chart.setAnimationOptions(QChart::SeriesAnimations);
-    chartview.setChart(&chart);
-    chartview.setRenderHint(QPainter::Antialiasing);
-    chartview.setParent(this->signal_frame);
-    chartview.resize(signal_frame->size());
-    chartview.show();
+    custom_plot.setParent(signal_frame);
+    custom_plot.xAxis->setLabel("x");
+    custom_plot.yAxis->setLabel("y");
+    // set axes ranges, so we see all data:
+    custom_plot.xAxis->setRange(-1, 1);
+    custom_plot.yAxis->setRange(0, 1);
+    custom_plot.replot();
+    xGraph = custom_plot.addGraph();
+    custom_plot.show();
 
     //robot
     QPolygonF poly2;
@@ -127,6 +128,7 @@ void SpecificWorker::compute()
     }
     if( not atTarget)
     {
+        static int cont = 0;
         x0 << bState.x, bState.z;
         double err = getErrorNorm(x0, xRef);
         //std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
@@ -135,15 +137,8 @@ void SpecificWorker::compute()
             omnirobot_proxy->setSpeedBase(0, 0, 0);
             std::cout << "FINISH" << std::endl;
             atTarget = true;
-            chart.removeAllSeries();
-            QSplineSeries *xs = new QSplineSeries();
-            QSplineSeries *ys = new QSplineSeries();
-            for(auto &&[i,c] : iter::enumerate(control_vector))
-            {   xs->append(i, c.x()); ys->append(i, c.y());    }
-            chart.addSeries(xs);
-            chart.addSeries(ys);
-            chart.createDefaultAxes();
             control_vector.clear();
+            cont = 0;
             return;
         }
 
@@ -164,7 +159,7 @@ void SpecificWorker::compute()
         ctr = ctr / ViriatoBase_WheelRadius;
         auto ll = (ViriatoBase_DistAxes + ViriatoBase_AxesLength) / (2.f*1000.f);
         auto crt_angle = std::clamp(angle, -1.f, 1.f);
-        omnirobot_proxy->setSpeedBase(ctr.x(), ctr.y()0);
+        omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), 0);
 
 //        auto control = (xRef - x0);
 //        qInfo() << xRef.x() << xRef.y() << x0.x() << x0.y() << control.x() << control.y();
@@ -176,6 +171,9 @@ void SpecificWorker::compute()
             path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
 
         draw_path(path);
+        xGraph->addData(cont, QPSolution(cont, 0));
+        cont++;
+        custom_plot.replot();
 
         // update the constraint bound
         updateConstraintVectors(x0, lowerBound, upperBound);
