@@ -70,18 +70,21 @@ void SpecificWorker::initialize(int period)
                     {
                         qInfo() << "Lambda SLOT: " << e->scenePos();
                         target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
+                        xGraph->data()->clear(); yGraph->data()->clear();
                         atTarget = false;
                     });
 
     //Draw
     custom_plot.setParent(signal_frame);
-    custom_plot.xAxis->setLabel("x");
-    custom_plot.yAxis->setLabel("y");
-    // set axes ranges, so we see all data:
-    custom_plot.xAxis->setRange(-1, 1);
-    custom_plot.yAxis->setRange(0, 1);
-    custom_plot.replot();
+    custom_plot.xAxis->setLabel("time");
+    custom_plot.yAxis->setLabel("velocity");
+    custom_plot.xAxis->setRange(0, 200);
+    custom_plot.yAxis->setRange(-1500, 1500);
     xGraph = custom_plot.addGraph();
+    xGraph->setPen(QColor("blue"));
+    yGraph = custom_plot.addGraph();
+    yGraph->setPen(QColor("red"));
+    custom_plot.resize(signal_frame->size());
     custom_plot.show();
 
     //robot
@@ -153,8 +156,6 @@ void SpecificWorker::compute()
         auto nose = innerModel->transform("base", QVec::vec3(QPSolution(2, 0), 0., QPSolution(3, 0)), "world");
         float angle = atan2(nose.x(), nose.z());
 
-        control_vector.push_back(QPointF(ctr.x(),ctr.y()));
-
         // convert mm/sg into radians. Should be un omniroboPyrep
         ctr = ctr / ViriatoBase_WheelRadius;
         auto ll = (ViriatoBase_DistAxes + ViriatoBase_AxesLength) / (2.f*1000.f);
@@ -165,13 +166,14 @@ void SpecificWorker::compute()
 //        qInfo() << xRef.x() << xRef.y() << x0.x() << x0.y() << control.x() << control.y();
 //        omnirobot_proxy->setSpeedBase(control.x()/ViriatoBase_WheelRadius, control.y()/ViriatoBase_WheelRadius, 0);
 
-        control_vector.push_back(QPointF(ctr.x(),ctr.y()));
         std::vector<QPointF> path;
         for(int i=0; i<mpcWindow*2; i+=2)
             path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
 
+        // draw
         draw_path(path);
-        xGraph->addData(cont, QPSolution(cont, 0));
+        xGraph->addData(cont, QPSolution(0, 0));
+        yGraph->addData(cont, QPSolution(1,0));
         cont++;
         custom_plot.replot();
 

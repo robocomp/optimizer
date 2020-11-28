@@ -97,7 +97,7 @@ private:
 
     // Draw
     QCustomPlot custom_plot;
-    QCPGraph *xGraph;
+    QCPGraph *xGraph, *yGraph;
     QSharedPointer<QCPAbstractPlottable1D<float>> xData;
 
     // optimizer
