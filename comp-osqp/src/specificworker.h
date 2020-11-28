@@ -101,28 +101,39 @@ private:
     QSharedPointer<QCPAbstractPlottable1D<float>> xData;
 
     // optimizer
+    using AMatrix = Eigen::Matrix<double, 2, 2>;
+    using BMatrix = Eigen::Matrix<double, 2, 2>;
+    using StateConstraintsMatrix = Eigen::Matrix<double, 2, 1>;
+    using ControlConstraintsMatrix = Eigen::Matrix<double, 2, 1>;
+    using QMatrix = Eigen::DiagonalMatrix<double, 2>;
+    using RMatrix = Eigen::DiagonalMatrix<double, 2>;
+    using StateSpaceMatrix = Eigen::Matrix<double, 2, 1>;
+
+    int mpcWindow = 20;
+
     OsqpEigen::Solver solver;
+
     // controller input and QPSolution vector
     Eigen::Vector2d ctr;
     Eigen::VectorXd QPSolution;
-    int mpcWindow = 20;
+
     // allocate the dynamics matrices
-    Eigen::Matrix<double, 2, 2> A;
-    Eigen::Matrix<double, 2, 2> B;
+    AMatrix A;
+    BMatrix B;
 
     // allocate the constraints vector
-    Eigen::Matrix<double, 2, 1> xMax;
-    Eigen::Matrix<double, 2, 1> xMin;
-    Eigen::Matrix<double, 2, 1> uMax;
-    Eigen::Matrix<double, 2, 1> uMin;
+    StateConstraintsMatrix xMax;
+    StateConstraintsMatrix  xMin;
+    ControlConstraintsMatrix uMax;
+    ControlConstraintsMatrix  uMin;
 
     // allocate the weight matrices
-    Eigen::DiagonalMatrix<double, 2> Q;
-    Eigen::DiagonalMatrix<double, 2> R;
+    QMatrix Q;
+    RMatrix R;
 
     // allocate the initial and the reference state space
-    Eigen::Matrix<double, 2, 1> x0;
-    Eigen::Matrix<double, 2, 1> xRef;
+    StateSpaceMatrix x0;
+    StateSpaceMatrix xRef;
 
     // allocate QP problem matrices and vectors
     Eigen::SparseMatrix<double> hessian;
@@ -132,22 +143,21 @@ private:
     Eigen::VectorXd upperBound;
 
     std::optional<Eigen::Matrix<double, 2, 1>> init_optmizer();
-    void setInequalityConstraints(Eigen::Matrix<double, 2, 1> &xMax, Eigen::Matrix<double, 2, 1> &xMin,
-                             Eigen::Matrix<double, 2, 1> &uMax, Eigen::Matrix<double, 2, 1> &uMin);
-    void setDynamicsMatrices(Eigen::Matrix<double, 2, 2> &A, Eigen::Matrix<double, 2, 2> &B);
-    void setWeightMatrices(Eigen::DiagonalMatrix<double, 2> &Q, Eigen::DiagonalMatrix<double, 2> &R);
-    void castMPCToQPHessian(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::DiagonalMatrix<double, 2> &R,
+    void setInequalityConstraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix&xMin, ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin);
+    void setDynamicsMatrices(AMatrix &A, BMatrix &B);
+    void setWeightMatrices(QMatrix &Q, RMatrix &R);
+    void castMPCToQPHessian(const QMatrix &Q, const RMatrix &R,
                             int mpcWindow, Eigen::SparseMatrix<double> &hessianMatrix);
-    void castMPCToQPGradient(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::Matrix<double, 2, 1> &xRef, int mpcWindow, Eigen::VectorXd &gradient);
-    void updateConstraintVectors(const Eigen::Matrix<double, 2, 1> &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
+    void castMPCToQPGradient(const QMatrix &Q, const StateSpaceMatrix &xRef, int mpcWindow, Eigen::VectorXd &gradient);
+    void updateConstraintVectors(const StateSpaceMatrix &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
     void castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 2, 2> &dynamicMatrix,
                                      const Eigen::Matrix<double, 2, 2> &controlMatrix,
                                      int mpcWindow, Eigen::SparseMatrix<double> &constraintMatrix);
-    void castMPCToQPConstraintVectors(const Eigen::Matrix<double, 2, 1> &xMax, const Eigen::Matrix<double, 2, 1> &xMin,
-                                      const Eigen::Matrix<double, 2, 1> &uMax, const Eigen::Matrix<double, 2, 1> &uMin,
-                                      const Eigen::Matrix<double, 2, 1> &x0,
+    void castMPCToQPConstraintVectors(const StateConstraintsMatrix &xMax, const StateConstraintsMatrix &xMin,
+                                      const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
+                                      const StateSpaceMatrix &x0,
                                       int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
-    double getErrorNorm(const Eigen::Matrix<double, 2, 1> &x, const Eigen::Matrix<double, 2, 1> &xRef);
+    double getErrorNorm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef);
 
 };
 

@@ -215,9 +215,7 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
     // instantiate the solver
     if (!solver.initSolver()) return {};
     return x0;
-
 }
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 void SpecificWorker::setDynamicsMatrices(Eigen::Matrix<double, 2, 2> &A, Eigen::Matrix<double, 2, 2> &B)
