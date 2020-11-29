@@ -112,13 +112,14 @@ private:
     using QMatrix = Eigen::DiagonalMatrix<double, state_dim>;
     using RMatrix = Eigen::DiagonalMatrix<double, control_dim>;
     using StateSpaceMatrix = Eigen::Matrix<double, state_dim, 1>;
+    using ControlSpaceVector = Eigen::Matrix<double, control_dim, 1>;
 
     const std::uint32_t horizon = 20;
 
     OsqpEigen::Solver solver;
 
     // controller input and QPSolution vector
-    Eigen::Vector2d ctr;
+    ControlSpaceVector ctr;
     Eigen::VectorXd QPSolution;
 
     // allocate the dynamics matrices
@@ -146,9 +147,11 @@ private:
     Eigen::VectorXd lowerBound;
     Eigen::VectorXd upperBound;
 
-    std::optional<Eigen::Matrix<double, 2, 1>> init_optmizer();
+    void init_optmizer();
     void set_dynamics_matrices(AMatrix &A, BMatrix &B);
-    void set_inequality_constraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix&xMin, ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin);
+    void set_inequality_constraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix&xMin,
+                                    ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin,
+                                    const ControlConstraintsMatrix &uzero);
     void set_weight_matrices(QMatrix &Q, RMatrix &R);
     void cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int mpcWindow, Eigen::SparseMatrix<double> &hessianMatrix);
     void cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceMatrix &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient);
@@ -158,7 +161,7 @@ private:
                                       const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
                                       const StateSpaceMatrix &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
     double get_error_norm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef);
-    void compute_jacobians(AMatrix &A, BMatrix &B, double vx, double vy, double alfa);
+    void compute_jacobians(AMatrix &A, BMatrix &B, double u_x, double u_y, double alfa);
 };
 
 
