@@ -101,15 +101,17 @@ private:
     QSharedPointer<QCPAbstractPlottable1D<float>> xData;
 
     // optimizer
-    using AMatrix = Eigen::Matrix<double, 2, 2>;
-    using BMatrix = Eigen::Matrix<double, 2, 2>;
-    using StateConstraintsMatrix = Eigen::Matrix<double, 2, 1>;
-    using ControlConstraintsMatrix = Eigen::Matrix<double, 2, 1>;
-    using QMatrix = Eigen::DiagonalMatrix<double, 2>;
-    using RMatrix = Eigen::DiagonalMatrix<double, 2>;
-    using StateSpaceMatrix = Eigen::Matrix<double, 2, 1>;
+    constexpr static std::size_t state_dim = 2;
+    constexpr static std::size_t control_dim = 2;
+    using AMatrix = Eigen::Matrix<double, state_dim, state_dim>;
+    using BMatrix = Eigen::Matrix<double, control_dim, control_dim>;
+    using StateConstraintsMatrix = Eigen::Matrix<double, state_dim, 1>;
+    using ControlConstraintsMatrix = Eigen::Matrix<double, control_dim, 1>;
+    using QMatrix = Eigen::DiagonalMatrix<double, state_dim>;
+    using RMatrix = Eigen::DiagonalMatrix<double, control_dim>;
+    using StateSpaceMatrix = Eigen::Matrix<double, state_dim, 1>;
 
-    int mpcWindow = 20;
+    const std::uint32_t horizon = 20;
 
     OsqpEigen::Solver solver;
 
@@ -143,21 +145,17 @@ private:
     Eigen::VectorXd upperBound;
 
     std::optional<Eigen::Matrix<double, 2, 1>> init_optmizer();
-    void setInequalityConstraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix&xMin, ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin);
-    void setDynamicsMatrices(AMatrix &A, BMatrix &B);
-    void setWeightMatrices(QMatrix &Q, RMatrix &R);
-    void castMPCToQPHessian(const QMatrix &Q, const RMatrix &R,
-                            int mpcWindow, Eigen::SparseMatrix<double> &hessianMatrix);
-    void castMPCToQPGradient(const QMatrix &Q, const StateSpaceMatrix &xRef, int mpcWindow, Eigen::VectorXd &gradient);
-    void updateConstraintVectors(const StateSpaceMatrix &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
-    void castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 2, 2> &dynamicMatrix,
-                                     const Eigen::Matrix<double, 2, 2> &controlMatrix,
-                                     int mpcWindow, Eigen::SparseMatrix<double> &constraintMatrix);
-    void castMPCToQPConstraintVectors(const StateConstraintsMatrix &xMax, const StateConstraintsMatrix &xMin,
+    void set_dynamics_matrices(AMatrix &A, BMatrix &B);
+    void set_inequality_constraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix&xMin, ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin);
+    void set_weight_matrices(QMatrix &Q, RMatrix &R);
+    void cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int mpcWindow, Eigen::SparseMatrix<double> &hessianMatrix);
+    void cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceMatrix &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient);
+    void update_constraint_vectors(const StateSpaceMatrix &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
+    void cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatrix, const BMatrix &controlMatrix, std::uint32_t horizon, Eigen::SparseMatrix<double> &constraintMatrix);
+    void cast_MPC_to_QP_constraint_vectors(const StateConstraintsMatrix &xMax, const StateConstraintsMatrix &xMin,
                                       const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
-                                      const StateSpaceMatrix &x0,
-                                      int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
-    double getErrorNorm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef);
+                                      const StateSpaceMatrix &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
+    double get_error_norm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef);
 
 };
 

@@ -126,14 +126,14 @@ void SpecificWorker::compute()
     if(auto t = target_buffer.try_get(); t.has_value())
     {
         xRef << t.value().x(), t.value().y();
-        castMPCToQPGradient(Q, xRef, mpcWindow, gradient);
+        cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
         if (!solver.updateGradient(gradient)) return ;
     }
     if( not atTarget)
     {
         static int cont = 0;
         x0 << bState.x, bState.z;
-        double err = getErrorNorm(x0, xRef);
+        double err = get_error_norm(x0, xRef);
         //std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
         if (err < 50)
         {
@@ -149,7 +149,7 @@ void SpecificWorker::compute()
         solver.clearSolverVariables();
         if (!solver.solve()) { qInfo() << "Out solve "; return;};
         QPSolution = solver.getSolution();
-        ctr = QPSolution.block(2 * (mpcWindow + 1), 0, 2, 1);
+        ctr = QPSolution.block(2 * (horizon + 1), 0, 2, 1);
 
         // execute control
         qInfo() << __FUNCTION__ << " Control: " << ctr.x() << ctr.y() << " Dist: " << err;
@@ -166,11 +166,10 @@ void SpecificWorker::compute()
 //        qInfo() << xRef.x() << xRef.y() << x0.x() << x0.y() << control.x() << control.y();
 //        omnirobot_proxy->setSpeedBase(control.x()/ViriatoBase_WheelRadius, control.y()/ViriatoBase_WheelRadius, 0);
 
-        std::vector<QPointF> path;
-        for(int i=0; i<mpcWindow*2; i+=2)
-            path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
-
         // draw
+        std::vector<QPointF> path;
+        for(int i=0; i<horizon*2; i+=2)
+            path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
         draw_path(path);
         xGraph->addData(cont, QPSolution(0, 0));
         yGraph->addData(cont, QPSolution(1,0));
@@ -178,7 +177,7 @@ void SpecificWorker::compute()
         custom_plot.replot();
 
         // update the constraint bound
-        updateConstraintVectors(x0, lowerBound, upperBound);
+        update_constraint_vectors(x0, lowerBound, upperBound);
         if (!solver.updateBounds(lowerBound, upperBound)) return;
 
     }
@@ -188,15 +187,15 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
 {
 
     // set MPC problem quantities
-    setDynamicsMatrices(A, B);
-    setInequalityConstraints(xMax, xMin, uMax, uMin);
-    setWeightMatrices(Q, R);
+    set_dynamics_matrices(A, B);
+    set_inequality_constraints(xMax, xMin, uMax, uMin);
+    set_weight_matrices(Q, R);
 
     // cast the MPC problem as QP problem
-    castMPCToQPHessian(Q, R, mpcWindow, hessian);
-    castMPCToQPGradient(Q, xRef, mpcWindow, gradient);
-    castMPCToQPConstraintMatrix(A, B, mpcWindow, linearMatrix);
-    castMPCToQPConstraintVectors(xMax, xMin, uMax, uMin, x0, mpcWindow, lowerBound, upperBound);
+    cast_MPC_to_QP_hessian(Q, R, horizon, hessian);
+    cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
+    cast_MPC_to_QP_constraint_matrix(A, B, horizon, linearMatrix);
+    cast_MPC_to_QP_constraint_vectors(xMax, xMin, uMax, uMin, x0, horizon, lowerBound, upperBound);
 
 
     // settings
@@ -204,8 +203,8 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
     solver.settings()->setWarmStart(true);
 
     // set the initial data of the QP solver
-    solver.data()->setNumberOfVariables(2 * (mpcWindow + 1) + 2 * mpcWindow);
-    solver.data()->setNumberOfConstraints(2 * 2 * (mpcWindow + 1) + 2 * mpcWindow);
+    solver.data()->setNumberOfVariables(2 * (horizon + 1) + 2 * horizon);
+    solver.data()->setNumberOfConstraints(2 * 2 * (horizon + 1) + 2 * horizon);
     if (!solver.data()->setHessianMatrix(hessian)) return {};
     if (!solver.data()->setGradient(gradient)) return {};
     if (!solver.data()->setLinearConstraintsMatrix(linearMatrix)) return {};
@@ -218,7 +217,7 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-void SpecificWorker::setDynamicsMatrices(Eigen::Matrix<double, 2, 2> &A, Eigen::Matrix<double, 2, 2> &B)
+void SpecificWorker::set_dynamics_matrices(AMatrix &A, BMatrix &B)
 {
     A <<    1., 0.,
             0., 1.;
@@ -226,140 +225,133 @@ void SpecificWorker::setDynamicsMatrices(Eigen::Matrix<double, 2, 2> &A, Eigen::
     B <<    1., 0.,
             0., 1.;
 }
-void SpecificWorker::setInequalityConstraints(Eigen::Matrix<double, 2, 1> &xMax, Eigen::Matrix<double, 2, 1> &xMin,
-                                              Eigen::Matrix<double, 2, 1> &uMax, Eigen::Matrix<double, 2, 1> &uMin)
+void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix &xMin, ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin)
 {
     xMax << 2500,
             2500;
     xMin << -2500,
             -2500;
-    uMax << 600,
-            600;
-    uMin << -600,
-            -600;
+
+    double u0 = 0;  // control at current linearization point
+    uMax << 600 - u0,
+            600 - u0;
+    uMin << -600 - u0,
+            -600 - u0;
 }
-void SpecificWorker::setWeightMatrices(Eigen::DiagonalMatrix<double, 2> &Q, Eigen::DiagonalMatrix<double, 2> &R)
+void SpecificWorker::set_weight_matrices(QMatrix &Q, RMatrix &R)
 {
     Q.diagonal() << 1., 1.;
     R.diagonal() << 1, 1;
 }
-void SpecificWorker::castMPCToQPHessian(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::DiagonalMatrix<double, 2> &R, int mpcWindow,
-                                        Eigen::SparseMatrix<double> &hessianMatrix)
+void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int horizon, Eigen::SparseMatrix<double> &hessianMatrix)
 {
-    hessianMatrix.resize(2 * (mpcWindow + 1) + 2 * mpcWindow, 2 * (mpcWindow + 1) + 2 * mpcWindow);
+    // room to stack horizon + 1 states and horizon controls.
+    hessianMatrix.resize(state_dim * (horizon + 1) + control_dim * horizon, state_dim * (horizon + 1) + control_dim * horizon);
 
-    //populate hessian matrix
-    for (int i = 0; i < 2 * (mpcWindow + 1) + 2 * mpcWindow; i++)
+    // populate hessian matrix
+    for (int i = 0; i < state_dim * (horizon + 1) + control_dim * horizon; i++)
     {
-        if (i < 2 * (mpcWindow + 1))
+        if (i < state_dim * (horizon + 1))  // the state part
         {
-            int posQ = i % 2;
-            float value = Q.diagonal()[posQ];
+            float value = Q.diagonal()[i % state_dim]; // 0, 1 ... state_dim over Q
             if (value != 0)
                 hessianMatrix.insert(i, i) = value;
-        } else
+        }
+        else
         {
-            int posR = i % 2;
-            float value = R.diagonal()[posR];
+            float value = R.diagonal()[i % control_dim]; // 0, 1 ... control_dim over R
             if (value != 0)
                 hessianMatrix.insert(i, i) = value;
         }
     }
 }
-void SpecificWorker::castMPCToQPGradient(const Eigen::DiagonalMatrix<double, 2> &Q, const Eigen::Matrix<double, 2, 1> &xRef, int mpcWindow,
-                                         Eigen::VectorXd &gradient)
+void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceMatrix &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient)
 {
-    Eigen::Matrix<double,2,1> Qx_ref;
+    Eigen::Matrix<double, state_dim, 1> Qx_ref;
     Qx_ref = Q * (-xRef);
 
     // populate the gradient vector
-    gradient = Eigen::VectorXd::Zero(2*(mpcWindow+1) +  2*mpcWindow, 1);
-    for(int i = 0; i<2*(mpcWindow+1); i++)
+    gradient = Eigen::VectorXd::Zero(state_dim*(horizon+1) +  control_dim*horizon, 1);
+    for(int i = 0; i<state_dim*(horizon+1); i++)
     {
-        int posQ=i%2;
+        int posQ = i % state_dim;
         float value = Qx_ref(posQ,0);
         gradient(i,0) = value;
     }
 }
-void SpecificWorker::castMPCToQPConstraintMatrix(const Eigen::Matrix<double, 2, 2> &dynamicMatrix, const Eigen::Matrix<double, 2, 2> &controlMatrix,
-                                                 int mpcWindow, Eigen::SparseMatrix<double> &constraintMatrix)
+void SpecificWorker::cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatrix, const BMatrix &controlMatrix, std::uint32_t horizon, Eigen::SparseMatrix<double> &constraintMatrix)
 {
-    constraintMatrix.resize(2*(mpcWindow+1)  + 2*(mpcWindow+1) + 2 * mpcWindow, 2*(mpcWindow+1) + 2 * mpcWindow);
+    constraintMatrix.resize(state_dim*(horizon+1)  + state_dim*(horizon+1) + control_dim*horizon, state_dim*(horizon+1) + control_dim*horizon);
 
     // populate linear constraint matrix
-    for(int i = 0; i<2*(mpcWindow+1); i++)
-    {
+    for(int i = 0; i<state_dim*(horizon+1); i++)
         constraintMatrix.insert(i,i) = -1;
-    }
 
-    for(int i = 0; i < mpcWindow; i++)
-        for(int j = 0; j<2; j++)
-            for(int k = 0; k<2; k++){
+    for(int i = 0; i < horizon; i++)
+        for(int j = 0; j<state_dim; j++)
+            for(int k = 0; k<state_dim; k++)
+            {
                 float value = dynamicMatrix(j,k);
-                if(value != 0){
-                    constraintMatrix.insert(2 * (i+1) + j, 2 * i + k) = value;
-                }
+                if(value != 0)
+                    constraintMatrix.insert(state_dim * (i+1) + j, state_dim * i + k) = value;
             }
 
-    for(int i = 0; i < mpcWindow; i++)
-        for(int j = 0; j < 2; j++)
-            for(int k = 0; k < 2; k++){
+    for(int i = 0; i < horizon; i++)
+        for(int j = 0; j < state_dim; j++)
+            for(int k = 0; k < control_dim; k++)
+            {
                 float value = controlMatrix(j,k);
-                if(value != 0){
-                    constraintMatrix.insert(2*(i+1)+j, 2*i+k+2*(mpcWindow + 1)) = value;
-                }
+                if(value != 0)
+                    constraintMatrix.insert(state_dim*(i+1)+j, control_dim*i+k+state_dim*(horizon + 1)) = value;
             }
 
-    for(int i = 0; i<2*(mpcWindow+1) + 2*mpcWindow; i++){
-        constraintMatrix.insert(i+(mpcWindow+1)*2,i) = 1;
-    }
+    for(int i = 0; i<state_dim*(horizon+1) + control_dim*horizon; i++)
+        constraintMatrix.insert(i+(horizon+1)*state_dim, i) = 1;
 }
 
-void SpecificWorker::castMPCToQPConstraintVectors(const Eigen::Matrix<double, 2, 1> &xMax, const Eigen::Matrix<double, 2, 1> &xMin,
-                                                  const Eigen::Matrix<double, 2, 1> &uMax, const Eigen::Matrix<double, 2, 1> &uMin,
-                                                  const Eigen::Matrix<double, 2, 1> &x0,
-                                                  int mpcWindow, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
+void SpecificWorker::cast_MPC_to_QP_constraint_vectors(const StateConstraintsMatrix &xMax, const StateConstraintsMatrix &xMin,
+                                                       const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
+                                                       const StateSpaceMatrix &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
 {
     // evaluate the lower and the upper inequality vectors
-    Eigen::VectorXd lowerInequality = Eigen::MatrixXd::Zero(2*(mpcWindow+1) +  2 * mpcWindow, 1);
-    Eigen::VectorXd upperInequality = Eigen::MatrixXd::Zero(2*(mpcWindow+1) +  2 * mpcWindow, 1);
-    for(int i=0; i<mpcWindow+1; i++){
-        lowerInequality.block(2*i,0,2,1) = xMin;
-        upperInequality.block(2*i,0,2,1) = xMax;
+    Eigen::VectorXd lowerInequality = Eigen::MatrixXd::Zero(state_dim*(horizon+1) +  control_dim*horizon, 1);
+    Eigen::VectorXd upperInequality = Eigen::MatrixXd::Zero(state_dim*(horizon+1) +  control_dim*horizon, 1);
+    for(int i=0; i<horizon+1; i++)
+    {
+        lowerInequality.block(state_dim*i,0,state_dim,1) = xMin;
+        upperInequality.block(state_dim*i,0,state_dim,1) = xMax;
     }
-    for(int i=0; i<mpcWindow; i++){
-        lowerInequality.block(2 * i + 2 * (mpcWindow + 1), 0, 2, 1) = uMin;
-        upperInequality.block(2 * i + 2 * (mpcWindow + 1), 0, 2, 1) = uMax;
+    for(int i=0; i<horizon; i++)
+    {
+        lowerInequality.block(control_dim*i + state_dim*(horizon + 1), 0, control_dim, 1) = uMin;
+        upperInequality.block(control_dim*i + state_dim*(horizon + 1), 0, control_dim, 1) = uMax;
     }
 
     // evaluate the lower and the upper equality vectors
-    Eigen::VectorXd lowerEquality = Eigen::MatrixXd::Zero(2*(mpcWindow+1),1 );
+    Eigen::VectorXd lowerEquality = Eigen::MatrixXd::Zero(state_dim*(horizon+1),1 );
     Eigen::VectorXd upperEquality;
-    lowerEquality.block(0,0,2,1) = -x0;
+    lowerEquality.block(0,0,state_dim,1) = -x0;
     upperEquality = lowerEquality;
     lowerEquality = lowerEquality;
 
     // merge inequality and equality vectors
-    lowerBound = Eigen::MatrixXd::Zero(2*2*(mpcWindow+1) +  2*mpcWindow,1 );
+    lowerBound = Eigen::MatrixXd::Zero(2*state_dim*(horizon+1) +  control_dim*horizon,1 );
     lowerBound << lowerEquality, lowerInequality;
 
-    upperBound = Eigen::MatrixXd::Zero(2*2*(mpcWindow+1) +  2*mpcWindow,1 );
+    upperBound = Eigen::MatrixXd::Zero(2*state_dim*(horizon+1) +  control_dim*horizon,1 );
     upperBound << upperEquality, upperInequality;
 }
 
-
-void SpecificWorker::updateConstraintVectors(const Eigen::Matrix<double, 2, 1> &x0,
-                                             Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
+void SpecificWorker::update_constraint_vectors(const StateSpaceMatrix &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
 {
-    lowerBound.block(0,0,2,1) = -x0;
-    upperBound.block(0,0,2,1) = -x0;
+    lowerBound.block(0,0,state_dim,1) = -x0;
+    upperBound.block(0,0,state_dim,1) = -x0;
 }
 
-double SpecificWorker::getErrorNorm(const Eigen::Matrix<double, 2, 1> &x, const Eigen::Matrix<double, 2, 1> &xRef)
+double SpecificWorker::get_error_norm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef)
 {
     // evaluate the error
-    Eigen::Matrix<double, 2, 1> error = x - xRef;
-    // return the norm
+    Eigen::Matrix<double, state_dim, 1> error = x - xRef;
     return error.norm();
 }
 
@@ -371,7 +363,7 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     {
         omnirobot_proxy->getBaseState(bState);
         innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
-        robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
+        robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
     }
     catch(const Ice::Exception &e)
