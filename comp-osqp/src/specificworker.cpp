@@ -70,7 +70,6 @@ void SpecificWorker::initialize(int period)
                     {
                         qInfo() << "Lambda SLOT: " << e->scenePos();
                         target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
-                        xGraph->data()->clear(); yGraph->data()->clear();
                         atTarget = false;
                     });
 
@@ -84,6 +83,8 @@ void SpecificWorker::initialize(int period)
     xGraph->setPen(QColor("blue"));
     yGraph = custom_plot.addGraph();
     yGraph->setPen(QColor("red"));
+    wGraph = custom_plot.addGraph();
+    wGraph->setPen(QColor("green"));
     custom_plot.resize(signal_frame->size());
     custom_plot.show();
 
@@ -130,6 +131,8 @@ void SpecificWorker::compute()
         cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
         if (!solver.updateGradient(gradient)) return ;
         cont = 0;
+        xGraph->data()->clear();wGraph->data()->clear();yGraph->data()->clear();
+        custom_plot.replot();
     }
     if( not atTarget)
     {
@@ -158,10 +161,6 @@ void SpecificWorker::compute()
 
         // execute control
         qInfo() << __FUNCTION__ << " Control: " << ctr.x() << ctr.y() << ctr.z() << " Dist: " << err;
-
-        // convert mm/sg into radians. Should be un omniroboPyrep
-        ctr = ctr / ViriatoBase_WheelRadius;
-        auto ll = (ViriatoBase_DistAxes + ViriatoBase_AxesLength) / (2.f*1000.f);
         omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), (float)ctr.z());
 
 //        auto control = (xRef - x0);
@@ -173,11 +172,11 @@ void SpecificWorker::compute()
         for(std::uint32_t i=0; i<horizon*state_dim; i+=state_dim)
             path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
         draw_path(path);
-        xGraph->addData(cont, QPSolution(0, 0));
-        yGraph->addData(cont, QPSolution(1,0));
+        xGraph->addData(cont, ctr.x());
+        yGraph->addData(cont, ctr.y());
+        wGraph->addData(cont, ctr.z()*100);
         cont++;
         custom_plot.replot();
-
     }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -246,17 +245,17 @@ void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
 
     uMax << 600,
             600,
-            10;
+            1;
     uMin << -600,
             -600,
-            -10;
+            -1;
     uMax -= uzero;
     uMin -= uzero;
 }
 void SpecificWorker::set_weight_matrices(QMatrix &Q, RMatrix &R)
 {
-    Q.diagonal() << 1., 1., 1.;
-    R.diagonal() << 1., 1., 1.;
+    Q.diagonal() << 0.1, 0.1, 10.;
+    R.diagonal() << 0.01, 0.01, 1.;
 }
 void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int horizon, Eigen::SparseMatrix<double> &hessianMatrix)
 {
@@ -323,7 +322,6 @@ void SpecificWorker::cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatr
     for(std::uint32_t i = 0; i<state_dim*(horizon+1) + control_dim*horizon; i++)
         constraintMatrix.insert(i+(horizon+1)*state_dim, i) = 1;
 }
-
 void SpecificWorker::cast_MPC_to_QP_constraint_vectors(const StateConstraintsMatrix &xMax, const StateConstraintsMatrix &xMin,
                                                        const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
                                                        const StateSpaceMatrix &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
@@ -362,7 +360,6 @@ void SpecificWorker::update_constraint_vectors(const StateSpaceMatrix &x0, Eigen
     lowerBound.block(0,0,state_dim,1) = -x0;
     upperBound.block(0,0,state_dim,1) = -x0;
 }
-
 double SpecificWorker::get_error_norm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef)
 {
     // evaluate the error

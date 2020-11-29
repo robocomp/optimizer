@@ -197,23 +197,18 @@ class SpecificWorker(GenericWorker):
         for x in datos.axes:
             if x.name == "advance":
                 adv = x.value if np.abs(x.value) > 0.1 else 0
-                adv = adv / self.ViriatoBase_WheelRadius;
             if x.name == "rotate":
                 rot = x.value if np.abs(x.value) > 0.1 else 0
-                #rint(ang_vel[2], rot, ang_vel[2] - rot)
                 #rot = rot * ((self.ViriatoBase_DistAxes + self.ViriatoBase_AxesLength) / 2)
-                rot = rot * self.ViriatoBase_Rotation_Factor
             if x.name == "side":
                 side = x.value if np.abs(x.value) > 0.1 else 0
-                side = side / self.ViriatoBase_WheelRadius;
 
-        print("Joystick ", adv, rot, side)
-        #converted_speed = self.convert_base_speed_to_radians([adv, side, rot])
+        converted = self.convert_base_speed_to_radians(adv, side, rot)
+        print("Joystick ", converted)
+        self.robot.set_base_angular_velocites(converted)
 
-        self.robot.set_base_angular_velocites([adv, side, rot])
-
-    def convert_base_speed_to_radians(self, unconverted_speeds):
-        return []
+    def convert_base_speed_to_radians(self, adv, side, rot):
+        return [adv / self.ViriatoBase_WheelRadius, side / self.ViriatoBase_WheelRadius, rot * self.ViriatoBase_Rotation_Factor]
 
 
     ##################################################################################
@@ -316,7 +311,7 @@ class SpecificWorker(GenericWorker):
     # setSpeedBase
     #
     def OmniRobot_setSpeedBase(self, advx, advz, rot):
-        self.speed_robot = [advz, advx, rot]
+        self.speed_robot = self.convert_base_speed_to_radians(advz, advx, rot)
 
     #
     # stopBase

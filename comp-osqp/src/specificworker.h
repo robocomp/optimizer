@@ -97,8 +97,8 @@ private:
 
     // Draw
     QCustomPlot custom_plot;
-    QCPGraph *xGraph, *yGraph;
-    QSharedPointer<QCPAbstractPlottable1D<float>> xData;
+    QCPGraph *xGraph, *yGraph, *wGraph;
+
 
     // optimizer
     // constexpr static std::size_t state_dim = 2;
