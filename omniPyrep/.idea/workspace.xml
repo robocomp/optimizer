@@ -23,11 +23,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="fcc88995-63e0-4d7e-ac97-5e523a7bcdb9" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/../comp-osqp/src/CMakeListsSpecific.txt" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/CMakeListsSpecific.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../comp-osqp/src/specificworker.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/specificworker.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../comp-osqp/src/specificworker.h" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/specificworker.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/specificworker.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/specificworker.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -151,7 +148,7 @@
       <workItem from="1603096090593" duration="3385000" />
       <workItem from="1604221367135" duration="14184000" />
       <workItem from="1605955494291" duration="17488000" />
-      <workItem from="1606603301274" duration="188000" />
+      <workItem from="1606603301274" duration="787000" />
     </task>
     <servers />
   </component>

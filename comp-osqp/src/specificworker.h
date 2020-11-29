@@ -101,8 +101,10 @@ private:
     QSharedPointer<QCPAbstractPlottable1D<float>> xData;
 
     // optimizer
-    constexpr static std::size_t state_dim = 2;
-    constexpr static std::size_t control_dim = 2;
+    // constexpr static std::size_t state_dim = 2;
+    constexpr static std::size_t state_dim = 3;
+    // constexpr static std::size_t control_dim = 2;
+    constexpr static std::size_t control_dim = 3;
     using AMatrix = Eigen::Matrix<double, state_dim, state_dim>;
     using BMatrix = Eigen::Matrix<double, control_dim, control_dim>;
     using StateConstraintsMatrix = Eigen::Matrix<double, state_dim, 1>;
@@ -156,7 +158,7 @@ private:
                                       const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
                                       const StateSpaceMatrix &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
     double get_error_norm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef);
-
+    void compute_jacobians(AMatrix &A, BMatrix &B, double vx, double vy, double alfa);
 };
 
 

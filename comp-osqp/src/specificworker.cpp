@@ -115,7 +115,6 @@ void SpecificWorker::initialize(int period)
 void SpecificWorker::compute()
 {
     static Eigen::Vector2f target;
-    static std::vector<QPointF> control_vector;
     auto bState = read_base();
     //auto laser_poly = read_laser();
     //fill_grid(laser_poly);
@@ -131,7 +130,7 @@ void SpecificWorker::compute()
     }
     if( not atTarget)
     {
-        static int cont = 0;
+
         x0 << bState.x, bState.z;
         double err = get_error_norm(x0, xRef);
         //std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
@@ -140,13 +139,18 @@ void SpecificWorker::compute()
             omnirobot_proxy->setSpeedBase(0, 0, 0);
             std::cout << "FINISH" << std::endl;
             atTarget = true;
-            control_vector.clear();
-            cont = 0;
             return;
         }
 
+        // update QP problem
+        if (!solver.updateHessianMatrix(hessian)) return {};
+        if (!solver.updateGradient(gradient)) return {};
+        if (!solver.updateLinearConstraintsMatrix(linearMatrix)) return {};
+        // update the constraint bound
+        update_constraint_vectors(x0, lowerBound, upperBound);
+        if (!solver.updateBounds(lowerBound, upperBound)) return;
+
         // solve the QP problem
-        solver.clearSolverVariables();
         if (!solver.solve()) { qInfo() << "Out solve "; return;};
         QPSolution = solver.getSolution();
         ctr = QPSolution.block(2 * (horizon + 1), 0, 2, 1);
@@ -176,9 +180,7 @@ void SpecificWorker::compute()
         cont++;
         custom_plot.replot();
 
-        // update the constraint bound
-        update_constraint_vectors(x0, lowerBound, upperBound);
-        if (!solver.updateBounds(lowerBound, upperBound)) return;
+
 
     }
 }
@@ -186,6 +188,7 @@ void SpecificWorker::compute()
 std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
 {
 
+    solver.clearSolverVariables();
     // set MPC problem quantities
     set_dynamics_matrices(A, B);
     set_inequality_constraints(xMax, xMin, uMax, uMin);
@@ -196,7 +199,6 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
     cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
     cast_MPC_to_QP_constraint_matrix(A, B, horizon, linearMatrix);
     cast_MPC_to_QP_constraint_vectors(xMax, xMin, uMax, uMin, x0, horizon, lowerBound, upperBound);
-
 
     // settings
     //solver.settings()->setVerbosity(false);
@@ -217,6 +219,16 @@ std::optional<Eigen::Matrix<double, 2, 1>> SpecificWorker::init_optmizer()
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
+void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double vx, double vy, double vr, double deltaT)
+{
+    double alfa = vr * deltaT;
+    A <<    1., 0.,  (-vx * sin(alfa) - vy*cos(alfa))*deltaT,
+            0., 1.,  (vx * cos(alfa) - vy * sin(alfa))*deltaT;
+
+    B <<    cos(alfa),  -sin(alfa),   0.,
+            sin(alfa),  cos(alfa),    0.,
+            0.,          0.,          1.;
+}
 void SpecificWorker::set_dynamics_matrices(AMatrix &A, BMatrix &B)
 {
     A <<    1., 0.,
@@ -225,7 +237,10 @@ void SpecificWorker::set_dynamics_matrices(AMatrix &A, BMatrix &B)
     B <<    1., 0.,
             0., 1.;
 }
-void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix &xMin, ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin)
+void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
+                                                StateConstraintsMatrix &xMin,
+                                                ControlConstraintsMatrix &uMax,
+                                                ControlConstraintsMatrix &uMin)
 {
     xMax << 2500,
             2500;
