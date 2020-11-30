@@ -59,51 +59,9 @@ void SpecificWorker::initialize(int period)
     grid.initialize(&scene, dim);
 
     //view
-    graphicsView->setScene(&scene);
-    graphicsView->setMinimumSize(400,400);
-    scene.setItemIndexMethod(QGraphicsScene::NoIndex);
-    scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
-    graphicsView->scale(1, -1);
-    graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
-    graphicsView->show();
-    connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
-                    {
-                        qInfo() << "Lambda SLOT: " << e->scenePos();
-                        target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
-                        atTarget = false;
-                    });
+    init_drawing(dim);
 
-    //Draw
-    custom_plot.setParent(signal_frame);
-    custom_plot.xAxis->setLabel("time");
-    custom_plot.yAxis->setLabel("velocity");
-    custom_plot.xAxis->setRange(0, 200);
-    custom_plot.yAxis->setRange(-1500, 1500);
-    xGraph = custom_plot.addGraph();
-    xGraph->setPen(QColor("blue"));
-    yGraph = custom_plot.addGraph();
-    yGraph->setPen(QColor("red"));
-    wGraph = custom_plot.addGraph();
-    wGraph->setPen(QColor("green"));
-    custom_plot.resize(signal_frame->size());
-    custom_plot.show();
-
-    //robot
-    QPolygonF poly2;
-    float size = ROBOT_LENGTH / 2.f;
-    poly2 << QPoint(-size, -size)
-          << QPoint(-size, size)
-          << QPoint(-size / 3, size * 1.6)
-          << QPoint(size / 3, size * 1.6)
-          << QPoint(size, size)
-          << QPoint(size, -size);
-    QBrush brush;
-    brush.setColor(QColor("DarkRed"));
-    brush.setStyle(Qt::SolidPattern);
-    robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), brush);
-    robot_polygon->setZValue(5);
-    robot_polygon->setPos(0,0);
-
+    // optimizer
     init_optmizer();
 
     this->Period = period;
@@ -126,7 +84,7 @@ void SpecificWorker::compute()
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
     {
-        xRef << t.value().x(), t.value().y(), 0.;
+        xRef << t.value().x(), t.value().y(), 1.4;
         solver.clearSolverVariables();
         cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
         if (!solver.updateGradient(gradient)) return ;
@@ -148,7 +106,7 @@ void SpecificWorker::compute()
         }
 
         // update QP problem
-        compute_jacobians(A, B, bState.advVx, bState.advVz, bState.alpha );
+        compute_jacobians(A, B, bState.advVx*this->Period/1000, bState.advVz/this->Period/1000, bState.alpha );
         cast_MPC_to_QP_constraint_matrix(A, B, horizon, linearMatrix);
         if (!solver.updateLinearConstraintsMatrix(linearMatrix)) qWarning() << "SHIT";
         update_constraint_vectors(x0, lowerBound, upperBound);
@@ -216,7 +174,7 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
 {
     A <<    1., 0.,  -u_x * sin(alfa) - u_y * cos(alfa),
             0., 1.,   u_x * cos(alfa) - u_y * sin(alfa),
-            0., 0.,   1. ;
+            0., 0.,   this->Period/1000 ;
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
@@ -451,6 +409,53 @@ void SpecificWorker::draw_path( const std::vector<QPointF> &path)
         path_paint.push_back(scene.addEllipse(p.x()-25, p.y()-25, 50 , 50, QPen(path_color), QBrush(QColor(path_color))));
 }
 
+void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
+{
+    graphicsView->setScene(&scene);
+    graphicsView->setMinimumSize(400,400);
+    scene.setItemIndexMethod(QGraphicsScene::NoIndex);
+    scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
+    graphicsView->scale(1, -1);
+    graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
+    graphicsView->show();
+    connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
+    {
+        qInfo() << "Lambda SLOT: " << e->scenePos();
+        target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
+        atTarget = false;
+    });
+
+    //Draw
+    custom_plot.setParent(signal_frame);
+    custom_plot.xAxis->setLabel("time");
+    custom_plot.yAxis->setLabel("velocity");
+    custom_plot.xAxis->setRange(0, 200);
+    custom_plot.yAxis->setRange(-1500, 1500);
+    xGraph = custom_plot.addGraph();
+    xGraph->setPen(QColor("blue"));
+    yGraph = custom_plot.addGraph();
+    yGraph->setPen(QColor("red"));
+    wGraph = custom_plot.addGraph();
+    wGraph->setPen(QColor("green"));
+    custom_plot.resize(signal_frame->size());
+    custom_plot.show();
+
+    //robot
+    QPolygonF poly2;
+    float size = ROBOT_LENGTH / 2.f;
+    poly2 << QPoint(-size, -size)
+          << QPoint(-size, size)
+          << QPoint(-size / 3, size * 1.6)
+          << QPoint(size / 3, size * 1.6)
+          << QPoint(size, size)
+          << QPoint(size, -size);
+    QBrush brush;
+    brush.setColor(QColor("DarkRed"));
+    brush.setStyle(Qt::SolidPattern);
+    robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), brush);
+    robot_polygon->setZValue(5);
+    robot_polygon->setPos(0,0);
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {

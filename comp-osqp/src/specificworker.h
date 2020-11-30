@@ -98,6 +98,7 @@ private:
     // Draw
     QCustomPlot custom_plot;
     QCPGraph *xGraph, *yGraph, *wGraph;
+    void init_drawing( Grid<>::Dimensions dim);
 
 
     // optimizer
