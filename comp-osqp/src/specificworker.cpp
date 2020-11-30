@@ -64,7 +64,7 @@ void SpecificWorker::initialize(int period)
     // optimizer
     init_optmizer();
 
-    this->Period = period;
+    this->Period = 100;
     if(this->startup_check_flag)
         this->startup_check();
     else
@@ -84,7 +84,7 @@ void SpecificWorker::compute()
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
     {
-        xRef << t.value().x(), t.value().y(), 1.4;
+        xRef << t.value().x(), t.value().y(), M_PI_2;
         solver.clearSolverVariables();
         cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
         if (!solver.updateGradient(gradient)) return ;
@@ -95,9 +95,9 @@ void SpecificWorker::compute()
     if( not atTarget)
     {
         x0 << bState.x, bState.z, bState.alpha;
-        double err = get_error_norm(x0, xRef);
-        //std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
-        if (err < 50)
+        double pos_error = sqrt(pow(x0.x() - xRef.x(),2) + pow(x0.y() - xRef.y(),2));
+        double rot_error = sqrt(pow(x0.z() - xRef.z(),2));
+        if (pos_error < 40 and rot_error < 0.1)
         {
             omnirobot_proxy->setSpeedBase(0, 0, 0);
             std::cout << "FINISH" << std::endl;
@@ -118,7 +118,10 @@ void SpecificWorker::compute()
         ctr = QPSolution.block(state_dim * (horizon + 1), 0, control_dim, 1);
 
         // execute control
-        qInfo() << __FUNCTION__ << " Control: " << ctr.x() << ctr.y() << ctr.z() << " Dist: " << err;
+        qInfo() << __FUNCTION__ << "  Control: " << ctr.x() << ctr.y() << ctr.z();
+        qInfo() << "\t" << " Pose: " << bState.x << bState.z << bState.alpha ;
+        qInfo() << "\t" << " Target: " << xRef.x() << xRef.y() << xRef.z() ;
+        qInfo() << "\t" << " Error: " << pos_error << rot_error;
         omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), (float)ctr.z());
 
 //        auto control = (xRef - x0);
@@ -174,11 +177,20 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
 {
     A <<    1., 0.,  -u_x * sin(alfa) - u_y * cos(alfa),
             0., 1.,   u_x * cos(alfa) - u_y * sin(alfa),
-            0., 0.,   this->Period/1000 ;
+            0., 0.,   1 ;
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
-            0.,          0.,          1.;
+            0.,          0.,          this->Period/1000.;
+
+//        A <<    1., 0.,  -u_x * cos(alfa) + u_y * sin(alfa),
+//            0., 1.,  -u_x * sin(alfa) - u_y * cos(alfa),
+//            0., 0.,   1. ;
+//
+//    B <<    -sin(alfa),  -cos(alfa),   0.,
+//            cos(alfa),  -sin(alfa),    0.,
+//            0.,          0.,          this->Period/1000.;
+
 }
 void SpecificWorker::set_dynamics_matrices(AMatrix &A, BMatrix &B)
 {
@@ -203,17 +215,17 @@ void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
 
     uMax << 600,
             600,
-            1;
+            0.5;
     uMin << -600,
-            -600,
-            -1;
+            0,
+            -0.5;
     uMax -= uzero;
     uMin -= uzero;
 }
 void SpecificWorker::set_weight_matrices(QMatrix &Q, RMatrix &R)
 {
-    Q.diagonal() << 0.1, 0.1, 10.;
-    R.diagonal() << 0.01, 0.01, 1.;
+    Q.diagonal() << 0.01, 0.01, 5.;
+    R.diagonal() << 0.01, 0.01, 5.;
 }
 void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int horizon, Eigen::SparseMatrix<double> &hessianMatrix)
 {
@@ -247,8 +259,8 @@ void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceM
     for(std::uint32_t i = 0; i<state_dim*(horizon+1); i++)
     {
         int posQ = i % state_dim;
-        float value = Qx_ref(posQ,0);
-        gradient(i,0) = value;
+        //float value = Qx_ref(posQ,0);
+        gradient(i,0) = Qx_ref(posQ,0);
     }
 }
 void SpecificWorker::cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatrix, const BMatrix &controlMatrix, std::uint32_t horizon, Eigen::SparseMatrix<double> &constraintMatrix)

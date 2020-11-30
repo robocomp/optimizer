@@ -11,7 +11,9 @@
 
 #include <QtCore/QVariant>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QFrame>
 #include <QtWidgets/QGraphicsView>
+#include <QtWidgets/QSplitter>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QWidget>
 
@@ -21,7 +23,9 @@ class Ui_guiDlg
 {
 public:
     QVBoxLayout *verticalLayout;
+    QSplitter *splitter;
     QGraphicsView *graphicsView;
+    QFrame *signal_frame;
 
     void setupUi(QWidget *guiDlg)
     {
@@ -30,10 +34,20 @@ public:
         guiDlg->resize(800, 600);
         verticalLayout = new QVBoxLayout(guiDlg);
         verticalLayout->setObjectName(QString::fromUtf8("verticalLayout"));
-        graphicsView = new QGraphicsView(guiDlg);
+        splitter = new QSplitter(guiDlg);
+        splitter->setObjectName(QString::fromUtf8("splitter"));
+        splitter->setOrientation(Qt::Vertical);
+        graphicsView = new QGraphicsView(splitter);
         graphicsView->setObjectName(QString::fromUtf8("graphicsView"));
+        splitter->addWidget(graphicsView);
+        signal_frame = new QFrame(splitter);
+        signal_frame->setObjectName(QString::fromUtf8("signal_frame"));
+        signal_frame->setMinimumSize(QSize(200, 300));
+        signal_frame->setFrameShape(QFrame::StyledPanel);
+        signal_frame->setFrameShadow(QFrame::Raised);
+        splitter->addWidget(signal_frame);
 
-        verticalLayout->addWidget(graphicsView);
+        verticalLayout->addWidget(splitter);
 
 
         retranslateUi(guiDlg);
