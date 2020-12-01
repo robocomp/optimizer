@@ -477,3 +477,19 @@ int SpecificWorker::startup_check()
     return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////
+void SpecificWorker::JoystickAdapter_sendData (RoboCompJoystickAdapter::TData data)
+{
+    float adv = 0.0; float rot = 0.0; float side = 0.0;
+    for(auto &x : data.axes)
+    {
+        if(x.name == "advance")
+            if(fabs(x.value) > 0.1) adv = x.value; else adv = 0;
+        if(x.name == "rotate")
+            if(fabs(x.value) > 0.1) rot = x.value; else rot = 0;
+        if(x.name == "side")
+            if(fabs(x.value) > 0.1) side = x.value; else side = 0;
+    }
+    //converted = self.convert_base_speed_to_radians(adv, side, rot)
+    //print("Joystick ", converted)
+    //self.robot.set_base_angular_velocites(converted)
+}

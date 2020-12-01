@@ -32,6 +32,7 @@
 #include <CommonBehavior.h>
 
 #include <GenericBase.h>
+#include <JoystickAdapter.h>
 #include <Laser.h>
 #include <OmniRobot.h>
 
@@ -59,6 +60,7 @@ public:
 	RoboCompLaser::LaserPrxPtr laser_proxy;
 	RoboCompOmniRobot::OmniRobotPrxPtr omnirobot_proxy;
 
+	virtual void JoystickAdapter_sendData (RoboCompJoystickAdapter::TData data) = 0;
 
 protected:
 
