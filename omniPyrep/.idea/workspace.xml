@@ -24,7 +24,11 @@
   <component name="ChangeListManager">
     <list default="true" id="fcc88995-63e0-4d7e-ac97-5e523a7bcdb9" name="Default Changelist" comment="">
       <change beforePath="$PROJECT_DIR$/../comp-osqp/src/specificworker.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/specificworker.cpp" afterDir="false" />
+<<<<<<< HEAD
       <change beforePath="$PROJECT_DIR$/../comp-osqp/src/specificworker.h" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/specificworker.h" afterDir="false" />
+=======
+      <change beforePath="$PROJECT_DIR$/../comp-osqp/src/ui_mainUI.h" beforeDir="false" afterPath="$PROJECT_DIR$/../comp-osqp/src/ui_mainUI.h" afterDir="false" />
+>>>>>>> c7cd2509218e71713df895d07284f31c5c4e736e
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

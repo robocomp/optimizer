@@ -64,7 +64,7 @@ void SpecificWorker::initialize(int period)
     // optimizer
     init_optmizer();
 
-    this->Period = period;
+    this->Period = 100;
     if(this->startup_check_flag)
         this->startup_check();
     else
@@ -84,7 +84,7 @@ void SpecificWorker::compute()
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
     {
-        xRef << t.value().x(), t.value().y(), -M_PI_2;
+        xRef << t.value().x(), t.value().y(), M_PI_2;
         solver.clearSolverVariables();
         cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
         if (!solver.updateGradient(gradient)) return ;
@@ -95,8 +95,6 @@ void SpecificWorker::compute()
     if( not atTarget)
     {
         x0 << bState.x, bState.z, bState.alpha;
-        double err = get_error_norm(x0, xRef);
-        //std::cout << __FUNCTION__ << " ------------- Initial state " << x0 << std::endl;
         double pos_error = sqrt(pow(x0.x() - xRef.x(),2) + pow(x0.y() - xRef.y(),2));
         double rot_error = sqrt(pow(x0.z() - xRef.z(),2));
         if (pos_error < 40 and rot_error < 0.1)
@@ -185,7 +183,7 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
             sin(alfa),  cos(alfa),    0.,
             0.,          0.,          this->Period/1000;
 
-//    A <<    1., 0.,  -u_x * cos(alfa) + u_y * sin(alfa),
+//        A <<    1., 0.,  -u_x * cos(alfa) + u_y * sin(alfa),
 //            0., 1.,  -u_x * sin(alfa) - u_y * cos(alfa),
 //            0., 0.,   1. ;
 //
@@ -225,10 +223,10 @@ void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
 }
 void SpecificWorker::set_weight_matrices(QMatrix &Q, RMatrix &R)
 {
-    Q.diagonal() << 1, 1, 1;
-    R.diagonal() << 0.001, 0.001, 1;
     //Q.diagonal() << 0.1, 0.1, 10.;
     //R.diagonal() << 0.01, 0.01, 1.;
+    Q.diagonal() << 0.01, 0.01, 5.;
+    R.diagonal() << 0.01, 0.01, 5.;
 }
 void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int horizon, Eigen::SparseMatrix<double> &hessianMatrix)
 {
