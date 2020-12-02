@@ -78,6 +78,7 @@ private:
     const float ViriatoBase_WheelRadius = 76.2;
     const float ViriatoBase_DistAxes = 380.f;
     const float ViriatoBase_AxesLength = 422.f;
+    const float ViriatoBase_Rotation_Factor = 8.1;  // it should be (DistAxes + AxesLength) / 2
 
     // target
     DoubleBuffer<Eigen::Vector2f, Eigen::Vector2f> target_buffer;
@@ -101,7 +102,7 @@ private:
     QCustomPlot custom_plot;
     QCPGraph *xGraph, *yGraph, *wGraph;
     void init_drawing( Grid<>::Dimensions dim);
-
+    float jadv = 0.0; float jrot = 0.0; float jside = 0.0;
 
     // optimizer
     constexpr static std::size_t state_dim = 3;

@@ -181,15 +181,8 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
-            0.,          0.,          this->Period/1000;
+            0.,          0.,          -this->Period/1000;  //OJO
 
-//        A <<    1., 0.,  -u_x * cos(alfa) + u_y * sin(alfa),
-//            0., 1.,  -u_x * sin(alfa) - u_y * cos(alfa),
-//            0., 0.,   1. ;
-//
-//    B <<    -sin(alfa),  -cos(alfa),   0.,
-//            cos(alfa),  -sin(alfa),    0.,
-//            0.,          0.,          this->Period/1000.;
 }
 void SpecificWorker::set_dynamics_matrices(AMatrix &A, BMatrix &B)
 {
@@ -348,6 +341,18 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
         innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
         robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
+
+//        float deltaT = this->Period / 1000.f;
+//        float w = qDegreesToRadians(robot_polygon->rotation());
+//        QPointF p= robot_polygon->pos();
+//        Eigen::Matrix<float, state_dim, control_dim> forward_model;
+//        forward_model <<    cos(w),  -sin(w),               0.,
+//                            sin(w),  cos(w),                0.,
+//                            0.,          0.,                -1.;
+//        Eigen::Vector3f new_pos = Eigen::Vector3f(p.x(), p.y(), w) + forward_model * Eigen::Vector3f(jside, jadv, jrot) * deltaT;
+//        robot_polygon->setRotation(qRadiansToDegrees(new_pos.z()));
+//        robot_polygon->setPos(new_pos.x(), new_pos.y());
+
     }
     catch(const Ice::Exception &e)
     { std::cout << "Error reading from Camera" << e << std::endl;}
@@ -467,7 +472,14 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
     brush.setStyle(Qt::SolidPattern);
     robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), brush);
     robot_polygon->setZValue(5);
-    robot_polygon->setPos(0,0);
+    try
+    {
+        RoboCompGenericBase::TBaseState bState;
+        omnirobot_proxy->getBaseState(bState);
+        robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
+        robot_polygon->setPos(bState.x, bState.z);
+    }
+    catch(const Ice::Exception &e){};
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
@@ -479,17 +491,16 @@ int SpecificWorker::startup_check()
 ///////////////////////////////////////////////////////////////////////////////////////////////
 void SpecificWorker::JoystickAdapter_sendData (RoboCompJoystickAdapter::TData data)
 {
-    float adv = 0.0; float rot = 0.0; float side = 0.0;
     for(auto &x : data.axes)
     {
-        if(x.name == "advance")
-            if(fabs(x.value) > 0.1) adv = x.value; else adv = 0;
-        if(x.name == "rotate")
-            if(fabs(x.value) > 0.1) rot = x.value; else rot = 0;
-        if(x.name == "side")
-            if(fabs(x.value) > 0.1) side = x.value; else side = 0;
+        if(x.name == "advance"){
+            if(fabs(x.value) > 0.1) jadv = x.value; else jadv = 0;}
+        if(x.name == "rotate"){
+            if(fabs(x.value) > 0.1) jrot = x.value; else jrot = 0;}
+        if(x.name == "side"){
+            if(fabs(x.value) > 0.1) jside = x.value; else jside = 0;}
     }
-    //converted = self.convert_base_speed_to_radians(adv, side, rot)
-    //print("Joystick ", converted)
-    //self.robot.set_base_angular_velocites(converted)
+//    jadv = (jadv / ViriatoBase_WheelRadius);
+//    jside = (jside / ViriatoBase_WheelRadius);
+//    jrot = (jrot * ViriatoBase_Rotation_Factor);
 }
