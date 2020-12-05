@@ -54,16 +54,46 @@ void SpecificWorker::initialize(int period)
 
 	//grid
 	Grid<>::Dimensions dim;  //default values
-	grid.initialize(&scene, dim);
+    grid.initialize(&scene, dim);
 
-	//view
+    //view
+    init_drawing(dim);
+
+    // target
+    target = QPointF(0, 2000);
+    newTarget = false;
+
+    // path
+    for(auto i : iter::range(0, 2100, 250))
+        path.emplace_back(QPointF(100 - qrand()%200, i));
+    draw_path();
+
+    initialize_model();
+
+	this->Period = period;
+	if(this->startup_check_flag)
+		this->startup_check();
+	else
+		timer.start(Period);
+}
+
+void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
+{
     graphicsView->setScene(&scene);
-	graphicsView->setMinimumSize(400,400);
+    graphicsView->setMinimumSize(400,400);
     scene.setItemIndexMethod(QGraphicsScene::NoIndex);
     scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
     graphicsView->scale(1, -1);
     graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
     graphicsView->show();
+    connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
+    {
+        qDebug() << "Lambda SLOT: " << e->scenePos();
+        target = QPointF(e->scenePos().x() , e->scenePos().y());
+        newTarget = true;
+        // target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
+        // atTarget = false;
+    });
 
     //robot
     QPolygonF poly2;
@@ -81,31 +111,39 @@ void SpecificWorker::initialize(int period)
     robot_polygon->setZValue(5);
     robot_polygon->setPos(0,0);
 
-    // target
-    target = QPointF(500, 2200);
-
-    // path
-    for(auto i : iter::range(0, 2300, 100))
-        path.emplace_back(QPointF(100 - qrand()%200, i));
-    draw_path();
-
-    initialize_model();
-
-	this->Period = period;
-	if(this->startup_check_flag)
-		this->startup_check();
-	else
-		timer.start(Period);
 }
 
 void SpecificWorker::compute()
 {
     auto bState = read_base();
-    auto laser_poly = read_laser();
-    fill_grid(laser_poly);
-    auto [x,z,alpha] = state_change(bState, 0.1);  //secs
+    // auto laser_poly = read_laser();
+    // fill_grid(laser_poly);
+    // auto [x,z,alpha] = state_change(bState, 0.1);  //secs
+    if(newTarget)
+    {
+        QPointF x0(bState.x, bState.z);
+        double pos_error = sqrt(pow(x0.x() - target.x(),2) + pow(x0.y() - target.y(),2));
+        rtarget =  innerModel->transform("base", QVec::vec3(target.x(), 0., target.y()), "world");
+        //double rot_error = sqrt(pow(x0.z() - xRef.z(),2));
+        if (pos_error < 40)
+        {
+            omnirobot_proxy->setSpeedBase(0, 0, 0);
+            std::cout << "FINISH" << std::endl;
+            newTarget = false;
+        }
+        else
+        {
+            optimize();
+            float x = vel_vars[0].get(GRB_DoubleAttr_X);
+            float y = vel_vars[1].get(GRB_DoubleAttr_X);
+            omnirobot_proxy->setSpeedBase(x, y, 0);
+        }
+        
+        qDebug() << "target from robot" <<rtarget;
+
+    }
     draw_path();
-    qInfo() << bState.x << bState.z << bState.alpha << "--" << x << z << alpha;
+    //qInfo() << bState.x << bState.z << bState.alpha;
 }
 
 void SpecificWorker::initialize_model()
@@ -118,32 +156,43 @@ void SpecificWorker::initialize_model()
     model->set(GRB_StringAttr_ModelName, "path_optimization");
 
     uint np = path.size();
-    model_vars = model->addVars(6*np, GRB_CONTINUOUS);
+    model_vars = model->addVars(4*np, GRB_CONTINUOUS);
     pose_vars = &(model_vars[0]);
     vel_vars = &(model_vars[2*np]);
-    sin_cos_vars = &(model_vars[4*np]);
+    //sin_cos_vars = &(model_vars[4*np]);
     
     for (uint e = 0; e < np; e++)
     {
         ostringstream vnamex, vnamey;
         vnamex << "x" << e;
         pose_vars[e*2].set(GRB_StringAttr_VarName, vnamex.str());
-//        pose_vars[e*2].set(GRB_DoubleAttr_Start, path[e].x());
+        pose_vars[e*2].set(GRB_DoubleAttr_LB, -10000);
+        pose_vars[e*2].set(GRB_DoubleAttr_UB, +10000);
+        //pose_vars[e*2].set(GRB_DoubleAttr_Start, path[e].x());
         vnamey << "y" << e;
         pose_vars[e*2+1].set(GRB_StringAttr_VarName, vnamey.str());
-//        pose_vars[e*2+1].set(GRB_DoubleAttr_Start, path[e].y());
+        pose_vars[e*2+1].set(GRB_DoubleAttr_LB, -10000);
+        pose_vars[e*2+1].set(GRB_DoubleAttr_UB, +10000);
+
+        //pose_vars[e*2+1].set(GRB_DoubleAttr_Start, path[e].y());
     }
     for (uint e = 0; e < np; e++)
     {
         ostringstream vnameu, vnamev, vnamesin, vnamecos;
         vnameu << "u" << e;
         vel_vars[e*2].set(GRB_StringAttr_VarName, vnameu.str());
+        vel_vars[e*2].set(GRB_DoubleAttr_LB, -10000);
+        vel_vars[e*2].set(GRB_DoubleAttr_UB, +10000);
+
         vnamev << "v" << e;
         vel_vars[e*2+1].set(GRB_StringAttr_VarName, vnamev.str());
-        vnamesin << "sin_v" << e;
-        sin_cos_vars[e*2].set(GRB_StringAttr_VarName, vnamesin.str());
-        vnamecos << "cos_v" << e;
-        sin_cos_vars[e*2+1].set(GRB_StringAttr_VarName, vnamecos.str());
+        vel_vars[e*2+1].set(GRB_DoubleAttr_LB, -10000);
+        vel_vars[e*2+1].set(GRB_DoubleAttr_UB, +10000);
+
+        // vnamesin << "sin_v" << e;
+        // sin_cos_vars[e*2].set(GRB_StringAttr_VarName, vnamesin.str());
+        // vnamecos << "cos_v" << e;
+        // sin_cos_vars[e*2+1].set(GRB_StringAttr_VarName, vnamecos.str());
 
     }
 
@@ -192,51 +241,66 @@ void SpecificWorker::initialize_model()
 
     // }
 
-    GRBQuadExpr obj;
     obj = 0;
     for (uint e = 0; e < np-1; e++)
     {
-        obj += (pose_vars[e*2]-pose_vars[(e+1)*2])*(pose_vars[e*2]-pose_vars[(e+1)*2]);
-        obj += (pose_vars[e*2+1]-pose_vars[(e+1)*2+1])*(pose_vars[e*2+1]-pose_vars[(e+1)*2+1]);
-    }
+        obj += vel_vars[e*2]*vel_vars[e*2];
+        obj += vel_vars[e*2+1]*vel_vars[e*2+1];
 
+        //obj += (pose_vars[e*2]-pose_vars[(e+1)*2])*(pose_vars[e*2]-pose_vars[(e+1)*2]);
+        //obj += (pose_vars[e*2+1]-pose_vars[(e+1)*2+1])*(pose_vars[e*2+1]-pose_vars[(e+1)*2+1]);
+    }
+    model->update();
+
+}
+void SpecificWorker::optimize()
+{
+    uint np = path.size();
+
+    auto c1x = model->getConstrByName("c1x");
+    model->remove(c1x);
+    auto c1y = model->getConstrByName("c1y");
+    model->remove(c1y);
+    model->update();
+    model->addConstr(pose_vars[(np-1)*2] == rtarget[0], "c1x");
+    model->addConstr(pose_vars[(np-1)*2+1] == rtarget[2], "c1y");
+    model->update();
     model->setObjective(obj, GRB_MINIMIZE);
     model->optimize();
 
-    cout << "before optimizing" << endl;
-    for(uint e = 0; e < np; e++)
-    {
-        float x = pose_vars[e*2].get(GRB_DoubleAttr_Start);
-        cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
-        float y = pose_vars[e*2+1].get(GRB_DoubleAttr_Start);
-        cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
-    
-    }
 
-    cout << "after optimizing" << endl;
+    // cout << "before optimizing" << endl;
+    // for(uint e = 0; e < np; e++)
+    // {
+    //     float x = pose_vars[e*2].get(GRB_DoubleAttr_Start);
+    //     cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
+    //     float y = pose_vars[e*2+1].get(GRB_DoubleAttr_Start);
+    //     cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
+    
+    // }
+
+    // cout << "after optimizing" << endl;
     path.clear();
     for(uint e = 0; e < np; e++)
     {
         float x = pose_vars[e*2].get(GRB_DoubleAttr_X);
-        cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " "
-         << x << endl;
+        // cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " "
+        // << x << endl;
         float y = pose_vars[e*2+1].get(GRB_DoubleAttr_X);
-        cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
-         << y << endl;
-        path.emplace_back(QPointF(x, y));
+        // cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+        // << y << endl;
+        QVec p =  innerModel->transform("world", QVec::vec3(x, 0., y), "base");
+        path.emplace_back(QPointF(p[0], p[2]));
     }
-    for(uint e = 0; e < np; e++)
-    {
-        float x = vel_vars[e*2].get(GRB_DoubleAttr_X);
-        cout << vel_vars[e*2].get(GRB_StringAttr_VarName) << " "
-         << x << endl;
-        float y = vel_vars[e*2+1].get(GRB_DoubleAttr_X);
-        cout << vel_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
-         << y << endl;
-    }
-}
-void SpecificWorker::optimize()
-{
+    // for(uint e = 0; e < np; e++)
+    // {
+    //     float x = vel_vars[e*2].get(GRB_DoubleAttr_X);
+    //     cout << vel_vars[e*2].get(GRB_StringAttr_VarName) << " "
+    //      << x << endl;
+    //     float y = vel_vars[e*2+1].get(GRB_DoubleAttr_X);
+    //     cout << vel_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+    //      << y << endl;
+    // }
 
 }
 
@@ -246,13 +310,15 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     RoboCompGenericBase::TBaseState bState;
     try
     {
-        differentialrobot_proxy->getBaseState(bState);
-        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
-        robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
+        omnirobot_proxy->getBaseState(bState);
+        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, -bState.alpha, 0);
+        robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
     }
     catch(const Ice::Exception &e)
-    { std::cout << "Error reading from Camera" << e << std::endl;}
+    { 
+    //    std::cout << "Error reading from Camera" << e << std::endl;
+    }
     return bState;
 }
 

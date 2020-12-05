@@ -13,12 +13,14 @@ SET ( HEADERS
 )
 
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 
 include_directories($ENV{GUROBI_HOME}/include/)
 
 link_directories($ENV{GUROBI_HOME}/lib/)
 
-SET (LIBS ${LIBS} gurobi_c++ gurobi91 )
+find_package( Qt5PrintSupport )
+
+SET (LIBS ${LIBS} gurobi_c++ gurobi91 Qt5::PrintSupport)
 
 

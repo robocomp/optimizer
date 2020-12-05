@@ -30,10 +30,21 @@
 #include <genericworker.h>
 #include <innermodel/innermodel.h>
 #include <QGraphicsScene>
+#include <QGraphicsSceneMouseEvent>
 #include <QGraphicsView>
 #include "grid.cpp"
 #include "grid.h"
 #include "gurobi_c++.h"
+
+class MyScene : public QGraphicsScene
+{
+    Q_OBJECT
+    signals:
+        void new_target(QGraphicsSceneMouseEvent *);
+protected:
+    void mousePressEvent(QGraphicsSceneMouseEvent *event)
+    { emit new_target(event); }
+};
 
 class SpecificWorker : public GenericWorker
 {
@@ -61,6 +72,8 @@ private:
 
     // target
     QPointF target;
+	QVec rtarget;
+	bool newTarget;
 
     // path
     std::vector<QPointF> path;
@@ -70,9 +83,11 @@ private:
 
 	// Grid
 	Grid<> grid;
-    QGraphicsScene scene;
+    MyScene scene;
     QGraphicsItem *robot_polygon = nullptr;
     QGraphicsItem *laser_polygon = nullptr;
+
+	void init_drawing( Grid<>::Dimensions dim);
 
 	// Model and optimizations
 	GRBEnv *env;
@@ -81,6 +96,7 @@ private:
 	GRBVar *pose_vars;
 	GRBVar *vel_vars;
 	GRBVar *sin_cos_vars;
+	GRBQuadExpr obj;
 
 
     const float ROBOT_LENGTH = 400;
