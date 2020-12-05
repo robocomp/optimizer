@@ -115,7 +115,7 @@ void SpecificWorker::compute()
         // solve the QP problem
         if (!solver.solve()) { qInfo() << "Out solve "; return;};
         QPSolution = solver.getSolution();
-        ctr = QPSolution.block(state_dim * (horizon + 1), 0, control_dim, 1);
+        ctr = QPSolution.block(state_dim * (horizon + 1), 0, control_dim, 1) * 2.4;
 
         // execute control
         qInfo() << __FUNCTION__ << "  Control: " << ctr.x() << ctr.y() << ctr.z();
@@ -124,10 +124,6 @@ void SpecificWorker::compute()
         qInfo() << "\t" << " Error: " << pos_error << rot_error;
         omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), (float)ctr.z());
 
-//        auto control = (xRef - x0);
-//        qInfo() << xRef.x() << xRef.y() << x0.x() << x0.y() << control.x() << control.y();
-//        omnirobot_proxy->setSpeedBase(control.x()/ViriatoBase_WheelRadius, control.y()/ViriatoBase_WheelRadius, 0);
-
         // draw
         std::vector<QPointF> path;
         for(std::uint32_t i=0; i<horizon*state_dim; i+=state_dim)
@@ -135,7 +131,7 @@ void SpecificWorker::compute()
         draw_path(path);
         xGraph->addData(cont, ctr.x());
         yGraph->addData(cont, ctr.y());
-        wGraph->addData(cont, ctr.z()*100);
+        wGraph->addData(cont, ctr.z()*300);
         cont++;
         custom_plot.replot();
     }
@@ -181,17 +177,10 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
-            0.,          0.,          -this->Period/1000;  //OJO
+            0.,          0.,          -this->Period;  //OJO
 
 }
-void SpecificWorker::set_dynamics_matrices(AMatrix &A, BMatrix &B)
-{
-    A <<    1., 0.,
-            0., 1.;
 
-    B <<    1., 0.,
-            0., 1.;
-}
 void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
                                                 StateConstraintsMatrix &xMin,
                                                 ControlConstraintsMatrix &uMax,
@@ -205,12 +194,12 @@ void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
             -2500,
             -OsqpEigen::INFTY;
 
-    uMax << 600,
+    uMax << 100,
             600,
-            0.8;
-    uMin << -600,
+            10;
+    uMin << -100,
             0,
-            -0.8;
+            -10;
     uMax -= uzero;
     uMin -= uzero;
 }
@@ -218,8 +207,8 @@ void SpecificWorker::set_weight_matrices(QMatrix &Q, RMatrix &R)
 {
     //Q.diagonal() << 0.1, 0.1, 10.;
     //R.diagonal() << 0.01, 0.01, 1.;
-    Q.diagonal() << 0.01, 0.01, 5.;
-    R.diagonal() << 0.01, 0.01, 5.;
+    Q.diagonal() << 0.01, 0.01, 0.01;
+    R.diagonal() << 0.01, 0.01, 0.01;
 }
 void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int horizon, Eigen::SparseMatrix<double> &hessianMatrix)
 {
@@ -503,4 +492,8 @@ void SpecificWorker::JoystickAdapter_sendData (RoboCompJoystickAdapter::TData da
 //    jadv = (jadv / ViriatoBase_WheelRadius);
 //    jside = (jside / ViriatoBase_WheelRadius);
 //    jrot = (jrot * ViriatoBase_Rotation_Factor);
+      jadv *= 2.4;
+      jside *= 2.4;
+      jrot *= 2.4;
+
 }
