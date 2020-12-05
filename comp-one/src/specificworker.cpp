@@ -60,11 +60,11 @@ void SpecificWorker::initialize(int period)
     init_drawing(dim);
 
     // target
-    target = QPointF(500, 2200);
-    newTarget = true;
+    target = QPointF(0, 2000);
+    newTarget = false;
 
     // path
-    for(auto i : iter::range(0, 2300, 100))
+    for(auto i : iter::range(0, 2100, 250))
         path.emplace_back(QPointF(100 - qrand()%200, i));
     draw_path();
 
@@ -123,21 +123,24 @@ void SpecificWorker::compute()
     {
         QPointF x0(bState.x, bState.z);
         double pos_error = sqrt(pow(x0.x() - target.x(),2) + pow(x0.y() - target.y(),2));
+        rtarget =  innerModel->transform("base", QVec::vec3(target.x(), 0., target.y()), "world");
         //double rot_error = sqrt(pow(x0.z() - xRef.z(),2));
         if (pos_error < 40)
         {
             omnirobot_proxy->setSpeedBase(0, 0, 0);
             std::cout << "FINISH" << std::endl;
             newTarget = false;
-            return;
         }
         else
         {
-            optimize(bState);
+            optimize();
             float x = vel_vars[0].get(GRB_DoubleAttr_X);
             float y = vel_vars[1].get(GRB_DoubleAttr_X);
             omnirobot_proxy->setSpeedBase(x, y, 0);
         }
+        
+        qDebug() << "target from robot" <<rtarget;
+
     }
     draw_path();
     //qInfo() << bState.x << bState.z << bState.alpha;
@@ -250,59 +253,54 @@ void SpecificWorker::initialize_model()
     model->update();
 
 }
-void SpecificWorker::optimize(const RoboCompGenericBase::TBaseState &bState)
+void SpecificWorker::optimize()
 {
     uint np = path.size();
 
-    auto c0x = model->getConstrByName("c0x");
-    model->remove(c0x);
-    auto c0y = model->getConstrByName("c0y");
-    model->remove(c0y);
     auto c1x = model->getConstrByName("c1x");
     model->remove(c1x);
     auto c1y = model->getConstrByName("c1y");
     model->remove(c1y);
     model->update();
-    model->addConstr(pose_vars[0] == bState.x, "c0x");
-    model->addConstr(pose_vars[1] == bState.z, "c0y");
-    model->addConstr(pose_vars[(np-1)*2] == target.x(), "c1x");
-    model->addConstr(pose_vars[(np-1)*2+1] == target.y(), "c1y");
+    model->addConstr(pose_vars[(np-1)*2] == rtarget[0], "c1x");
+    model->addConstr(pose_vars[(np-1)*2+1] == rtarget[2], "c1y");
     model->update();
     model->setObjective(obj, GRB_MINIMIZE);
     model->optimize();
 
 
-    cout << "before optimizing" << endl;
-    for(uint e = 0; e < np; e++)
-    {
-        float x = pose_vars[e*2].get(GRB_DoubleAttr_Start);
-        cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
-        float y = pose_vars[e*2+1].get(GRB_DoubleAttr_Start);
-        cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
+    // cout << "before optimizing" << endl;
+    // for(uint e = 0; e < np; e++)
+    // {
+    //     float x = pose_vars[e*2].get(GRB_DoubleAttr_Start);
+    //     cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
+    //     float y = pose_vars[e*2+1].get(GRB_DoubleAttr_Start);
+    //     cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
     
-    }
+    // }
 
-    cout << "after optimizing" << endl;
+    // cout << "after optimizing" << endl;
     path.clear();
     for(uint e = 0; e < np; e++)
     {
         float x = pose_vars[e*2].get(GRB_DoubleAttr_X);
-        cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " "
-         << x << endl;
+        // cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " "
+        // << x << endl;
         float y = pose_vars[e*2+1].get(GRB_DoubleAttr_X);
-        cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
-         << y << endl;
-        path.emplace_back(QPointF(x, y));
+        // cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+        // << y << endl;
+        QVec p =  innerModel->transform("world", QVec::vec3(x, 0., y), "base");
+        path.emplace_back(QPointF(p[0], p[2]));
     }
-    for(uint e = 0; e < np; e++)
-    {
-        float x = vel_vars[e*2].get(GRB_DoubleAttr_X);
-        cout << vel_vars[e*2].get(GRB_StringAttr_VarName) << " "
-         << x << endl;
-        float y = vel_vars[e*2+1].get(GRB_DoubleAttr_X);
-        cout << vel_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
-         << y << endl;
-    }
+    // for(uint e = 0; e < np; e++)
+    // {
+    //     float x = vel_vars[e*2].get(GRB_DoubleAttr_X);
+    //     cout << vel_vars[e*2].get(GRB_StringAttr_VarName) << " "
+    //      << x << endl;
+    //     float y = vel_vars[e*2+1].get(GRB_DoubleAttr_X);
+    //     cout << vel_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
+    //      << y << endl;
+    // }
 
 }
 
@@ -313,8 +311,8 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     try
     {
         omnirobot_proxy->getBaseState(bState);
-        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
-        robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
+        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, -bState.alpha, 0);
+        robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
     }
     catch(const Ice::Exception &e)

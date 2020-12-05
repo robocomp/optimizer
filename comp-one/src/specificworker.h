@@ -72,6 +72,7 @@ private:
 
     // target
     QPointF target;
+	QVec rtarget;
 	bool newTarget;
 
     // path
@@ -100,7 +101,7 @@ private:
 
     const float ROBOT_LENGTH = 400;
 	void initialize_model();
-	void optimize(const RoboCompGenericBase::TBaseState &bState);
+	void optimize();
     void fill_grid(const QPolygonF &ldata);
 
 
