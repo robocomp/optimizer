@@ -1,11 +1,11 @@
-import "DifferentialRobot.idsl";
+import "OmniRobot.idsl";
 import "Laser.idsl";
 
 Component compone
 {
     Communications
     {
-        requires DifferentialRobot, Laser;
+        requires OmniRobot, Laser;
     };
     language Cpp11;
     gui Qt(QWidget);
