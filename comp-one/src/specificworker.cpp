@@ -121,22 +121,23 @@ void SpecificWorker::compute()
     // auto [x,z,alpha] = state_change(bState, 0.1);  //secs
     if(newTarget)
     {
-        x0 << bState.x, bState.z, bState.alpha;
+        QPointF x0(bState.x, bState.z);
         double pos_error = sqrt(pow(x0.x() - target.x(),2) + pow(x0.y() - target.y(),2));
         //double rot_error = sqrt(pow(x0.z() - xRef.z(),2));
-        if (pos_error < 40 and rot_error < 0.1)
+        if (pos_error < 40)
         {
             omnirobot_proxy->setSpeedBase(0, 0, 0);
             std::cout << "FINISH" << std::endl;
             newTarget = false;
             return;
         }
-
-        optimize(bState);
-        float x = vel_vars[0].get(GRB_DoubleAttr_X);
-        float y = vel_vars[1].get(GRB_DoubleAttr_X);
-
-        
+        else
+        {
+            optimize(bState);
+            float x = vel_vars[0].get(GRB_DoubleAttr_X);
+            float y = vel_vars[1].get(GRB_DoubleAttr_X);
+            omnirobot_proxy->setSpeedBase(x, y, 0);
+        }
     }
     draw_path();
     //qInfo() << bState.x << bState.z << bState.alpha;
@@ -311,7 +312,7 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     RoboCompGenericBase::TBaseState bState;
     try
     {
-        differentialrobot_proxy->getBaseState(bState);
+        omnirobot_proxy->getBaseState(bState);
         innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
         robot_polygon->setRotation(qRadiansToDegrees(-bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);

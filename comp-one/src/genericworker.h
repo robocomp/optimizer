@@ -31,16 +31,16 @@
 #include <ui_mainUI.h>
 #include <CommonBehavior.h>
 
-#include <DifferentialRobot.h>
 #include <GenericBase.h>
 #include <Laser.h>
+#include <OmniRobot.h>
 
 
 #define CHECK_PERIOD 5000
 #define BASIC_PERIOD 100
 
 
-using TuplePrx = std::tuple<RoboCompDifferentialRobot::DifferentialRobotPrxPtr,RoboCompLaser::LaserPrxPtr>;
+using TuplePrx = std::tuple<RoboCompLaser::LaserPrxPtr,RoboCompOmniRobot::OmniRobotPrxPtr>;
 
 
 class GenericWorker : public QWidget, public Ui_guiDlg
@@ -56,8 +56,8 @@ public:
 	QMutex *mutex;
 
 
-	RoboCompDifferentialRobot::DifferentialRobotPrxPtr differentialrobot_proxy;
 	RoboCompLaser::LaserPrxPtr laser_proxy;
+	RoboCompOmniRobot::OmniRobotPrxPtr omnirobot_proxy;
 
 
 protected:
