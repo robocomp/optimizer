@@ -84,11 +84,9 @@ private:
     DoubleBuffer<Eigen::Vector2f, Eigen::Vector2f> target_buffer;
 
     // path
-    std::vector<QGraphicsEllipseItem *> path_paint;
-    QString path_color = "#FF00FF";
     bool atTarget = true;
-
-    void draw_path(const std::vector<QPointF> &path);
+    float ref_ang;
+    void draw_path(const std::vector<std::tuple<float, float, float>> &path);
 
     // Grid
     Grid<> grid;
@@ -103,6 +101,7 @@ private:
     QCPGraph *xGraph, *yGraph, *wGraph;
     void init_drawing( Grid<>::Dimensions dim);
     float jadv = 0.0; float jrot = 0.0; float jside = 0.0;
+    QGraphicsEllipseItem *target_draw = nullptr;
 
     // optimizer
     constexpr static std::size_t state_dim = 3;

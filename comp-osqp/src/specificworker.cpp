@@ -84,10 +84,22 @@ void SpecificWorker::compute()
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
     {
-        xRef << t.value().x(), t.value().y(), 0;
+        float tr_x = t.value().x()-bState.x; float tr_y = t.value().y() - bState.z;
+        ref_ang = -atan2(tr_x, tr_y);   // signo menos para tener ángulos respecto a Y CCW
+        xRef << t.value().x(), t.value().y(), ref_ang;
+
         solver.clearSolverVariables();
         cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
         if (!solver.updateGradient(gradient)) return ;
+
+        // draw
+        if(target_draw) scene.removeItem(target_draw);
+        target_draw = scene.addEllipse(t.value().x()-50, t.value().y()-50, 100, 100, QPen(QColor("green")), QBrush(QColor("green")));
+        auto ex = t.value().x() + 350*sin(-ref_ang); auto ey  =  t.value().y() + 350*cos(-ref_ang);  //OJO signos porque el ang está respecto a Y CCW
+        auto line = scene.addLine(t.value().x(), t.value().y(), ex, ey, QPen(QBrush(QColor("green")), 20));
+        line->setParentItem(target_draw);
+        auto ball = scene.addEllipse(ex-25, ey-25, 50, 50, QPen(QColor("green")), QBrush(QColor("green")));
+        ball->setParentItem(target_draw);
         cont = 0;
         xGraph->data()->clear();wGraph->data()->clear();yGraph->data()->clear();
         custom_plot.replot();
@@ -109,8 +121,6 @@ void SpecificWorker::compute()
         compute_jacobians(A, B, bState.advVx*this->Period/1000, bState.advVz/this->Period/1000, bState.alpha );
         cast_MPC_to_QP_constraint_matrix(A, B, horizon, linearMatrix);
         if (!solver.updateLinearConstraintsMatrix(linearMatrix)) qWarning() << "SHIT";
-        cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
-        if (!solver.updateGradient(gradient)) return ;
         update_constraint_vectors(x0, lowerBound, upperBound);
         if (!solver.updateBounds(lowerBound, upperBound)) qWarning() << "SHIT";
 
@@ -118,7 +128,6 @@ void SpecificWorker::compute()
         if (!solver.solve()) { qInfo() << "Out solve "; return;};
         QPSolution = solver.getSolution();
         ctr = QPSolution.block(state_dim * (horizon + 1), 0, control_dim, 1) * 2.4;
-
         // execute control
         qInfo() << __FUNCTION__ << "  Control: " << ctr.x() << ctr.y() << ctr.z();
         qInfo() << "\t" << " Pose: " << bState.x << bState.z << bState.alpha ;
@@ -127,13 +136,20 @@ void SpecificWorker::compute()
         omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), (float)ctr.z());
 
         // draw
-        std::vector<QPointF> path;
+        std::vector<std::tuple<float, float, float>> path;
         for(std::uint32_t i=0; i<horizon*state_dim; i+=state_dim)
-            path.emplace_back(QPointF(QPSolution(i, 0), QPSolution(i+1, 0)));
+            path.emplace_back(std::make_tuple(QPSolution(i, 0), QPSolution(i+1, 0), QPSolution(i+2, 0)));
         draw_path(path);
+        for(int i=0; i<horizon*control_dim; i+=3)
+        {
+
+            ControlSpaceVector c = QPSolution.block(state_dim * (horizon + 1) + i, 0, control_dim , 1);
+            if(fabs((float)c.z()) > 0)
+               qInfo() << "------ " << (float) c.z();
+        }
         xGraph->addData(cont, ctr.x());
         yGraph->addData(cont, ctr.y());
-        wGraph->addData(cont, ctr.z()*300);
+        wGraph->addData(cont, ctr.z()*300);  // visual scale
         cont++;
         custom_plot.replot();
     }
@@ -179,7 +195,7 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
-            0.,          0.,          -this->Period;  //OJO
+            0.,          0.,          -this->Period/100;
 
 }
 
@@ -196,12 +212,12 @@ void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
             -2500,
             -OsqpEigen::INFTY;
 
-    uMax << 10,
+    uMax << 600,
             600,
-            10;
-    uMin << -10,
+            1;
+    uMin << -600,
             0,
-            -10;
+            -1;
     uMax -= uzero;
     uMin -= uzero;
 }
@@ -209,8 +225,8 @@ void SpecificWorker::set_weight_matrices(QMatrix &Q, RMatrix &R)
 {
     //Q.diagonal() << 1, 1, 1;
     //R.diagonal() << 1, 1, 1.;
-    Q.diagonal() << 0.001, 0.001, 1;
-    R.diagonal() << 0.01, 0.01, 1;
+    Q.diagonal() << 1, 1, 1000;
+    R.diagonal() << 1, 1, 1000;
 }
 void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int horizon, Eigen::SparseMatrix<double> &hessianMatrix)
 {
@@ -236,14 +252,9 @@ void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, 
 }
 void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceMatrix &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient)
 {
-//    auto r = innerModel->transform("base", QVec::vec3(xRef.x(), 0, xRef.y()), "world");
-//    auto ang = atan2(r.x(),r.z());
-//    auto target = xRef;
-//    target[2] = ang;
 
     Eigen::Matrix<double, state_dim, 1> Qx_ref;
     Qx_ref = Q * (-xRef);
-    //Qx_ref = Q * (-target);
 
     // populate the gradient vector
     gradient = Eigen::VectorXd::Zero(state_dim*(horizon+1) +  control_dim*horizon, 1);
@@ -251,7 +262,6 @@ void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceM
     {
         int posQ = i % state_dim;
         gradient(i,0) = Qx_ref(posQ,0);
-        //if( posQ == 2 and i<state_dim*horizon)  gradient(i,0) = 0;
     }
 }
 void SpecificWorker::cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatrix, const BMatrix &controlMatrix, std::uint32_t horizon, Eigen::SparseMatrix<double> &constraintMatrix)
@@ -345,7 +355,7 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
 //        Eigen::Matrix<float, state_dim, control_dim> forward_model;
 //        forward_model <<    cos(w),  -sin(w),               0.,
 //                            sin(w),  cos(w),                0.,
-//                            0.,          0.,                -1.;
+//                            0.,          0.,                -this->Period / 1000.f;.;
 //        Eigen::Vector3f new_pos = Eigen::Vector3f(p.x(), p.y(), w) + forward_model * Eigen::Vector3f(jside, jadv, jrot) * deltaT;
 //        robot_polygon->setRotation(qRadiansToDegrees(new_pos.z()));
 //        robot_polygon->setPos(new_pos.x(), new_pos.y());
@@ -415,13 +425,30 @@ QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
     return poly;
 }
 
-void SpecificWorker::draw_path( const std::vector<QPointF> &path)
+void SpecificWorker::draw_path( const std::vector<std::tuple<float, float, float>> &path)
 {
+    static std::vector<QGraphicsLineItem *> path_paint;
+    static QString arrow_color = "#0000FF";
+    static QString ball_color = "#FF00FF";
+    static const float len = 300;
+
     for(auto p : path_paint)
         scene.removeItem(p);
     path_paint.clear();
-    for(auto &p : path)
-        path_paint.push_back(scene.addEllipse(p.x()-25, p.y()-25, 50 , 50, QPen(path_color), QBrush(QColor(path_color))));
+    auto [antx, anty, anta] = path.front();
+    for(auto &[x, y, ang] : path)
+    {
+        auto ex = x + len*sin(-ang); auto ey  =  y + len*cos(-ang); //OJO pintamos con - porque ang viene de Y CCW
+//        auto ex = x + len*sin(-ref_ang); auto ey  =  y + len*cos(-ref_ang);  //OJO pintamos con - porque ang viene de Y CCW
+        auto l = scene.addLine(x, y, ex, ey, QPen(QBrush(QColor(arrow_color)), 20));
+        path_paint.push_back(l);
+        auto e = scene.addEllipse(ex - 25, ey - 25, 50, 50, QPen(ball_color), QBrush(QColor(ball_color)));
+        e->setParentItem(l);
+        auto ll = scene.addLine(antx, anty, x, y, QPen(QBrush(QColor(arrow_color)), 10));
+        ll->setParentItem(l);
+        antx = x; anty = y;
+    }
+
 }
 
 void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
@@ -465,7 +492,9 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
           << QPoint(size, size)
           << QPoint(size, -size);
     QBrush brush;
-    brush.setColor(QColor("DarkRed"));
+    auto bcolor = QColor("DarkRed");
+    bcolor.setAlpha(80);
+    brush.setColor(bcolor);
     brush.setStyle(Qt::SolidPattern);
     robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), brush);
     robot_polygon->setZValue(5);
