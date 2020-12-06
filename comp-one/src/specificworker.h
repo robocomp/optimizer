@@ -36,6 +36,9 @@
 #include "grid.h"
 #include "gurobi_c++.h"
 
+#define NP 3 // Number of variables for the pose
+#define NV 3 // Number of variables for the velocity
+
 class MyScene : public QGraphicsScene
 {
     Q_OBJECT
@@ -72,6 +75,7 @@ private:
 
     // target
     QPointF target;
+	float target_ang;
 	QVec rtarget;
 	bool newTarget;
 

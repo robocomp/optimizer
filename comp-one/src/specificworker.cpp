@@ -61,6 +61,7 @@ void SpecificWorker::initialize(int period)
 
     // target
     target = QPointF(0, 2000);
+    target_ang = 0.;
     newTarget = false;
 
     // path
@@ -124,6 +125,8 @@ void SpecificWorker::compute()
         QPointF x0(bState.x, bState.z);
         double pos_error = sqrt(pow(x0.x() - target.x(),2) + pow(x0.y() - target.y(),2));
         rtarget =  innerModel->transform("base", QVec::vec3(target.x(), 0., target.y()), "world");
+        target_ang = atan2(rtarget[0], rtarget[2]);
+        qDebug()<<"target ang"<<target_ang;
         //double rot_error = sqrt(pow(x0.z() - xRef.z(),2));
         if (pos_error < 40)
         {
@@ -136,7 +139,8 @@ void SpecificWorker::compute()
             optimize();
             float x = vel_vars[0].get(GRB_DoubleAttr_X);
             float y = vel_vars[1].get(GRB_DoubleAttr_X);
-            omnirobot_proxy->setSpeedBase(x, y, 0);
+            float a = vel_vars[2].get(GRB_DoubleAttr_X);
+            omnirobot_proxy->setSpeedBase(x, y, a);
         }
         
         qDebug() << "target from robot" <<rtarget;
@@ -156,38 +160,49 @@ void SpecificWorker::initialize_model()
     model->set(GRB_StringAttr_ModelName, "path_optimization");
 
     uint np = path.size();
-    model_vars = model->addVars(4*np, GRB_CONTINUOUS);
+    model_vars = model->addVars((NP+NV)*np, GRB_CONTINUOUS);
     pose_vars = &(model_vars[0]);
-    vel_vars = &(model_vars[2*np]);
+    vel_vars = &(model_vars[NP*np]);
     //sin_cos_vars = &(model_vars[4*np]);
     
     for (uint e = 0; e < np; e++)
     {
-        ostringstream vnamex, vnamey;
+        ostringstream vnamex, vnamey, vnamea;
         vnamex << "x" << e;
-        pose_vars[e*2].set(GRB_StringAttr_VarName, vnamex.str());
-        pose_vars[e*2].set(GRB_DoubleAttr_LB, -10000);
-        pose_vars[e*2].set(GRB_DoubleAttr_UB, +10000);
+        pose_vars[e*NP].set(GRB_StringAttr_VarName, vnamex.str());
+        pose_vars[e*NP].set(GRB_DoubleAttr_LB, -10000);
+        pose_vars[e*NP].set(GRB_DoubleAttr_UB, +10000);
         //pose_vars[e*2].set(GRB_DoubleAttr_Start, path[e].x());
         vnamey << "y" << e;
-        pose_vars[e*2+1].set(GRB_StringAttr_VarName, vnamey.str());
-        pose_vars[e*2+1].set(GRB_DoubleAttr_LB, -10000);
-        pose_vars[e*2+1].set(GRB_DoubleAttr_UB, +10000);
+        pose_vars[e*NP+1].set(GRB_StringAttr_VarName, vnamey.str());
+        pose_vars[e*NP+1].set(GRB_DoubleAttr_LB, -10000);
+        pose_vars[e*NP+1].set(GRB_DoubleAttr_UB, +10000);
+        vnamea << "a" << e;
+        pose_vars[e*NP+2].set(GRB_StringAttr_VarName, vnamea.str());
+        pose_vars[e*NP+2].set(GRB_DoubleAttr_LB, -M_PI);
+        pose_vars[e*NP+2].set(GRB_DoubleAttr_UB, M_PI);
+
 
         //pose_vars[e*2+1].set(GRB_DoubleAttr_Start, path[e].y());
     }
     for (uint e = 0; e < np; e++)
     {
-        ostringstream vnameu, vnamev, vnamesin, vnamecos;
+        ostringstream vnameu, vnamev, vnamew, vnamesin, vnamecos;
         vnameu << "u" << e;
-        vel_vars[e*2].set(GRB_StringAttr_VarName, vnameu.str());
-        vel_vars[e*2].set(GRB_DoubleAttr_LB, -10000);
-        vel_vars[e*2].set(GRB_DoubleAttr_UB, +10000);
+        vel_vars[e*NV].set(GRB_StringAttr_VarName, vnameu.str());
+        vel_vars[e*NV].set(GRB_DoubleAttr_LB, -10000);
+        vel_vars[e*NV].set(GRB_DoubleAttr_UB, +10000);
 
         vnamev << "v" << e;
-        vel_vars[e*2+1].set(GRB_StringAttr_VarName, vnamev.str());
-        vel_vars[e*2+1].set(GRB_DoubleAttr_LB, -10000);
-        vel_vars[e*2+1].set(GRB_DoubleAttr_UB, +10000);
+        vel_vars[e*NV+1].set(GRB_StringAttr_VarName, vnamev.str());
+        vel_vars[e*NV+1].set(GRB_DoubleAttr_LB, -10000);
+        vel_vars[e*NV+1].set(GRB_DoubleAttr_UB, +10000);
+
+        vnamew << "w" << e;
+        vel_vars[e*NV+2].set(GRB_StringAttr_VarName, vnamew.str());
+        vel_vars[e*NV+2].set(GRB_DoubleAttr_LB, -M_PI);
+        vel_vars[e*NV+2].set(GRB_DoubleAttr_UB, M_PI);
+
 
         // vnamesin << "sin_v" << e;
         // sin_cos_vars[e*2].set(GRB_StringAttr_VarName, vnamesin.str());
@@ -198,24 +213,32 @@ void SpecificWorker::initialize_model()
 
     model->addConstr(pose_vars[0] == 0, "c0x");
     model->addConstr(pose_vars[1] == 0, "c0y");
-    model->addConstr(pose_vars[(np-1)*2] == target.x(), "c1x");
-    model->addConstr(pose_vars[(np-1)*2+1] == target.y(), "c1y");
+    model->addConstr(pose_vars[2] == 0, "c0a");
+    model->addConstr(pose_vars[(np-1)*NP] == target.x(), "c1x");
+    model->addConstr(pose_vars[(np-1)*NP+1] == target.y(), "c1y");
+    model->addConstr(pose_vars[(np-1)*NP+2] == target_ang, "c1a");
 
 
     for (uint e = 0; e < np-1; e++)
     {
-        ostringstream vnamecx, vnamecy;
+        ostringstream vnamecx, vnamecy, vnameca;
         GRBLinExpr le, re;
 
         vnamecx << "cx" << e+2;
-        le = pose_vars[e*2] + vel_vars[e*2];
-        re = pose_vars[(e+1)*2];
+        le = pose_vars[e*NP] + vel_vars[e*NV];
+        re = pose_vars[(e+1)*NP];
         model->addConstr( le == re, vnamecx.str());
         
         vnamecy << "cy" << e+2;
-        le = pose_vars[e*2+1] + vel_vars[e*2+1];        
-        re = pose_vars[(e+1)*2+1];
+        le = pose_vars[e*NP+1] + vel_vars[e*NV+1];        
+        re = pose_vars[(e+1)*NP+1];
         model->addConstr(le == re, vnamecy.str());
+
+        vnameca << "ca" << e+2;
+        le = pose_vars[e*NP+2] + vel_vars[e*NV+2];        
+        re = pose_vars[(e+1)*NP+2];
+        model->addConstr(le == re, vnameca.str());
+
     }
 
     // for (uint e = 0; e < np-1; e++)
@@ -244,8 +267,9 @@ void SpecificWorker::initialize_model()
     obj = 0;
     for (uint e = 0; e < np-1; e++)
     {
-        obj += vel_vars[e*2]*vel_vars[e*2];
-        obj += vel_vars[e*2+1]*vel_vars[e*2+1];
+        obj += vel_vars[e*NV]*vel_vars[e*NV];
+        obj += vel_vars[e*NV+1]*vel_vars[e*NV+1];
+        obj += vel_vars[e*NV+2]*vel_vars[e*NV+2];        
 
         //obj += (pose_vars[e*2]-pose_vars[(e+1)*2])*(pose_vars[e*2]-pose_vars[(e+1)*2]);
         //obj += (pose_vars[e*2+1]-pose_vars[(e+1)*2+1])*(pose_vars[e*2+1]-pose_vars[(e+1)*2+1]);
@@ -261,9 +285,13 @@ void SpecificWorker::optimize()
     model->remove(c1x);
     auto c1y = model->getConstrByName("c1y");
     model->remove(c1y);
+    auto c1a = model->getConstrByName("c1a");
+    model->remove(c1a);
+
     model->update();
-    model->addConstr(pose_vars[(np-1)*2] == rtarget[0], "c1x");
-    model->addConstr(pose_vars[(np-1)*2+1] == rtarget[2], "c1y");
+    model->addConstr(pose_vars[(np-1)*NP] == rtarget[0], "c1x");
+    model->addConstr(pose_vars[(np-1)*NP+1] == rtarget[2], "c1y");
+    model->addConstr(pose_vars[(np-1)*NP+2] == target_ang, "c1a");
     model->update();
     model->setObjective(obj, GRB_MINIMIZE);
     model->optimize();
@@ -283,10 +311,10 @@ void SpecificWorker::optimize()
     path.clear();
     for(uint e = 0; e < np; e++)
     {
-        float x = pose_vars[e*2].get(GRB_DoubleAttr_X);
+        float x = pose_vars[e*NP].get(GRB_DoubleAttr_X);
         // cout << pose_vars[e*2].get(GRB_StringAttr_VarName) << " "
         // << x << endl;
-        float y = pose_vars[e*2+1].get(GRB_DoubleAttr_X);
+        float y = pose_vars[e*NP+1].get(GRB_DoubleAttr_X);
         // cout << pose_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
         // << y << endl;
         QVec p =  innerModel->transform("world", QVec::vec3(x, 0., y), "base");
