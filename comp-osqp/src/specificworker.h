@@ -151,7 +151,6 @@ private:
     Eigen::VectorXd upperBound;
 
     void init_optmizer();
-    void set_dynamics_matrices(AMatrix &A, BMatrix &B);
     void set_inequality_constraints(StateConstraintsMatrix &xMax, StateConstraintsMatrix&xMin,
                                     ControlConstraintsMatrix &uMax, ControlConstraintsMatrix &uMin,
                                     const ControlConstraintsMatrix &uzero);

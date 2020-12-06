@@ -84,7 +84,7 @@ void SpecificWorker::compute()
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
     {
-        xRef << t.value().x(), t.value().y(), M_PI_2;
+        xRef << t.value().x(), t.value().y(), 0;
         solver.clearSolverVariables();
         cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
         if (!solver.updateGradient(gradient)) return ;
@@ -109,13 +109,15 @@ void SpecificWorker::compute()
         compute_jacobians(A, B, bState.advVx*this->Period/1000, bState.advVz/this->Period/1000, bState.alpha );
         cast_MPC_to_QP_constraint_matrix(A, B, horizon, linearMatrix);
         if (!solver.updateLinearConstraintsMatrix(linearMatrix)) qWarning() << "SHIT";
+        cast_MPC_to_QP_gradient(Q, xRef, horizon, gradient);
+        if (!solver.updateGradient(gradient)) return ;
         update_constraint_vectors(x0, lowerBound, upperBound);
         if (!solver.updateBounds(lowerBound, upperBound)) qWarning() << "SHIT";
 
         // solve the QP problem
         if (!solver.solve()) { qInfo() << "Out solve "; return;};
         QPSolution = solver.getSolution();
-        ctr = QPSolution.block(state_dim * (horizon + 1), 0, control_dim, 1);
+        ctr = QPSolution.block(state_dim * (horizon + 1), 0, control_dim, 1) * 2.4;
 
         // execute control
         qInfo() << __FUNCTION__ << "  Control: " << ctr.x() << ctr.y() << ctr.z();
@@ -124,10 +126,6 @@ void SpecificWorker::compute()
         qInfo() << "\t" << " Error: " << pos_error << rot_error;
         omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), (float)ctr.z());
 
-//        auto control = (xRef - x0);
-//        qInfo() << xRef.x() << xRef.y() << x0.x() << x0.y() << control.x() << control.y();
-//        omnirobot_proxy->setSpeedBase(control.x()/ViriatoBase_WheelRadius, control.y()/ViriatoBase_WheelRadius, 0);
-
         // draw
         std::vector<QPointF> path;
         for(std::uint32_t i=0; i<horizon*state_dim; i+=state_dim)
@@ -135,7 +133,7 @@ void SpecificWorker::compute()
         draw_path(path);
         xGraph->addData(cont, ctr.x());
         yGraph->addData(cont, ctr.y());
-        wGraph->addData(cont, ctr.z()*100);
+        wGraph->addData(cont, ctr.z()*300);
         cont++;
         custom_plot.replot();
     }
@@ -181,17 +179,10 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
-            0.,          0.,          -this->Period/1000;  //OJO
+            0.,          0.,          -this->Period;  //OJO
 
 }
-void SpecificWorker::set_dynamics_matrices(AMatrix &A, BMatrix &B)
-{
-    A <<    1., 0.,
-            0., 1.;
 
-    B <<    1., 0.,
-            0., 1.;
-}
 void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
                                                 StateConstraintsMatrix &xMin,
                                                 ControlConstraintsMatrix &uMax,
@@ -205,21 +196,21 @@ void SpecificWorker::set_inequality_constraints(StateConstraintsMatrix &xMax,
             -2500,
             -OsqpEigen::INFTY;
 
-    uMax << 600,
+    uMax << 10,
             600,
-            0.8;
-    uMin << -600,
+            10;
+    uMin << -10,
             0,
-            -0.8;
+            -10;
     uMax -= uzero;
     uMin -= uzero;
 }
 void SpecificWorker::set_weight_matrices(QMatrix &Q, RMatrix &R)
 {
-    //Q.diagonal() << 0.1, 0.1, 10.;
-    //R.diagonal() << 0.01, 0.01, 1.;
-    Q.diagonal() << 0.01, 0.01, 5.;
-    R.diagonal() << 0.01, 0.01, 5.;
+    //Q.diagonal() << 1, 1, 1;
+    //R.diagonal() << 1, 1, 1.;
+    Q.diagonal() << 0.001, 0.001, 1;
+    R.diagonal() << 0.01, 0.01, 1;
 }
 void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int horizon, Eigen::SparseMatrix<double> &hessianMatrix)
 {
@@ -245,8 +236,14 @@ void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, 
 }
 void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceMatrix &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient)
 {
+//    auto r = innerModel->transform("base", QVec::vec3(xRef.x(), 0, xRef.y()), "world");
+//    auto ang = atan2(r.x(),r.z());
+//    auto target = xRef;
+//    target[2] = ang;
+
     Eigen::Matrix<double, state_dim, 1> Qx_ref;
     Qx_ref = Q * (-xRef);
+    //Qx_ref = Q * (-target);
 
     // populate the gradient vector
     gradient = Eigen::VectorXd::Zero(state_dim*(horizon+1) +  control_dim*horizon, 1);
@@ -254,7 +251,7 @@ void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceM
     {
         int posQ = i % state_dim;
         gradient(i,0) = Qx_ref(posQ,0);
-        //if( posQ == 2 and i>3)  gradient(i,0) = 0;
+        //if( posQ == 2 and i<state_dim*horizon)  gradient(i,0) = 0;
     }
 }
 void SpecificWorker::cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatrix, const BMatrix &controlMatrix, std::uint32_t horizon, Eigen::SparseMatrix<double> &constraintMatrix)
@@ -338,7 +335,7 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     try
     {
         omnirobot_proxy->getBaseState(bState);
-        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, bState.alpha, 0);
+        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, -bState.alpha, 0);
         robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
 
@@ -503,4 +500,8 @@ void SpecificWorker::JoystickAdapter_sendData (RoboCompJoystickAdapter::TData da
 //    jadv = (jadv / ViriatoBase_WheelRadius);
 //    jside = (jside / ViriatoBase_WheelRadius);
 //    jrot = (jrot * ViriatoBase_Rotation_Factor);
+      jadv *= 2.4;
+      jside *= 2.4;
+      jrot *= 2.4;
+
 }

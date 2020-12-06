@@ -204,7 +204,7 @@ class SpecificWorker(GenericWorker):
                 side = x.value if np.abs(x.value) > 0.1 else 0
 
         converted = self.convert_base_speed_to_radians(adv, side, rot)
-        print("Joystick ", converted)
+        #print("Joystick ", converted)
         self.robot.set_base_angular_velocites(converted)
 
     def convert_base_speed_to_radians(self, adv, side, rot):
