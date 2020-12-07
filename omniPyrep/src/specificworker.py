@@ -203,12 +203,14 @@ class SpecificWorker(GenericWorker):
             if x.name == "side":
                 side = x.value if np.abs(x.value) > 0.1 else 0
 
+        #self.speed_robot = self.convert_base_speed_to_radians(adv, adv, rot)
         converted = self.convert_base_speed_to_radians(adv, side, rot)
         #print("Joystick ", converted)
         self.robot.set_base_angular_velocites(converted)
 
     def convert_base_speed_to_radians(self, adv, side, rot):
-        return [adv / self.ViriatoBase_WheelRadius, side / self.ViriatoBase_WheelRadius, rot * self.ViriatoBase_Rotation_Factor]
+        # rot has to be neg so neg rot speeds go clock wise. It is probably a sign in Pyrep forward kinematics
+        return [adv / self.ViriatoBase_WheelRadius, side / self.ViriatoBase_WheelRadius, -rot * self.ViriatoBase_Rotation_Factor]
 
 
     ##################################################################################

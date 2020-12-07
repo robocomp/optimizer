@@ -27,6 +27,7 @@
 SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorker(tprx)
 {
     this->startup_check_flag = startup_check;
+    readSettings();
 }
 
 /**
@@ -101,7 +102,7 @@ void SpecificWorker::compute()
         auto ball = scene.addEllipse(ex-25, ey-25, 50, 50, QPen(QColor("green")), QBrush(QColor("green")));
         ball->setParentItem(target_draw);
         cont = 0;
-        xGraph->data()->clear();wGraph->data()->clear();yGraph->data()->clear();
+        xGraph->data()->clear();wGraph->data()->clear();yGraph->data()->clear();exGraph->data()->clear();ewGraph->data()->clear();
         custom_plot.replot();
     }
     if( not atTarget)
@@ -128,28 +129,32 @@ void SpecificWorker::compute()
         if (!solver.solve()) { qInfo() << "Out solve "; return;};
         QPSolution = solver.getSolution();
         ctr = QPSolution.block(state_dim * (horizon + 1), 0, control_dim, 1) * 2.4;
+        //ctr = QPSolution.block(state_dim * (horizon + 1) + control_dim * 2, 0, control_dim, 1) * 2.4;
+
         // execute control
+        omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), (float)ctr.z());
+
+        // draw
         qInfo() << __FUNCTION__ << "  Control: " << ctr.x() << ctr.y() << ctr.z();
         qInfo() << "\t" << " Pose: " << bState.x << bState.z << bState.alpha ;
         qInfo() << "\t" << " Target: " << xRef.x() << xRef.y() << xRef.z() ;
         qInfo() << "\t" << " Error: " << pos_error << rot_error;
-        omnirobot_proxy->setSpeedBase((float)ctr.x(), (float)ctr.y(), (float)ctr.z());
-
-        // draw
+        qInfo() << "----------------------------------------------------";
         std::vector<std::tuple<float, float, float>> path;
         for(std::uint32_t i=0; i<horizon*state_dim; i+=state_dim)
             path.emplace_back(std::make_tuple(QPSolution(i, 0), QPSolution(i+1, 0), QPSolution(i+2, 0)));
         draw_path(path);
         for(int i=0; i<horizon*control_dim; i+=3)
         {
-
+            StateSpaceVector s = QPSolution.block(i, 0, state_dim , 1);
             ControlSpaceVector c = QPSolution.block(state_dim * (horizon + 1) + i, 0, control_dim , 1);
-            if(fabs((float)c.z()) > 0)
-               qInfo() << "------ " << (float) c.z();
+            qInfo() << "------ " << (float)s.z() << (float)c.z() << ref_ang;
         }
         xGraph->addData(cont, ctr.x());
         yGraph->addData(cont, ctr.y());
         wGraph->addData(cont, ctr.z()*300);  // visual scale
+        exGraph->addData(cont, pos_error);
+        ewGraph->addData(cont, rot_error*300);  // visual scale
         cont++;
         custom_plot.replot();
     }
@@ -195,7 +200,7 @@ void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, doubl
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
-            0.,          0.,          -this->Period/100;
+            0.,          0.,          this->Period/100;   //PARAMETRO CRITICO
 
 }
 
@@ -250,7 +255,7 @@ void SpecificWorker::cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, 
         }
     }
 }
-void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceMatrix &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient)
+void SpecificWorker::cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceVector &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient)
 {
 
     Eigen::Matrix<double, state_dim, 1> Qx_ref;
@@ -295,7 +300,7 @@ void SpecificWorker::cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatr
 }
 void SpecificWorker::cast_MPC_to_QP_constraint_vectors(const StateConstraintsMatrix &xMax, const StateConstraintsMatrix &xMin,
                                                        const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
-                                                       const StateSpaceMatrix &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
+                                                       const StateSpaceVector &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
 {
     // evaluate the lower and the upper inequality vectors
     Eigen::VectorXd lowerInequality = Eigen::MatrixXd::Zero(state_dim*(horizon+1) +  control_dim*horizon, 1);
@@ -326,12 +331,12 @@ void SpecificWorker::cast_MPC_to_QP_constraint_vectors(const StateConstraintsMat
     upperBound << upperEquality, upperInequality;
 }
 
-void SpecificWorker::update_constraint_vectors(const StateSpaceMatrix &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
+void SpecificWorker::update_constraint_vectors(const StateSpaceVector &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound)
 {
     lowerBound.block(0,0,state_dim,1) = -x0;
     upperBound.block(0,0,state_dim,1) = -x0;
 }
-double SpecificWorker::get_error_norm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef)
+double SpecificWorker::get_error_norm(const StateSpaceVector &x, const StateSpaceVector &xRef)
 {
     // evaluate the error
     Eigen::Matrix<double, state_dim, 1> error = x - xRef;
@@ -453,9 +458,9 @@ void SpecificWorker::draw_path( const std::vector<std::tuple<float, float, float
 
 void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
 {
+
     graphicsView->setScene(&scene);
-    graphicsView->setMinimumSize(400,400);
-    scene.setItemIndexMethod(QGraphicsScene::NoIndex);
+    graphicsView->setMinimumSize(600,600);
     scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
     graphicsView->scale(1, -1);
     graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
@@ -470,7 +475,7 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
     //Draw
     custom_plot.setParent(signal_frame);
     custom_plot.xAxis->setLabel("time");
-    custom_plot.yAxis->setLabel("velocity: x-blue y-red w-green");
+    custom_plot.yAxis->setLabel("vx-blue vy-red vw-green dist-magenta ew-black");
     custom_plot.xAxis->setRange(0, 200);
     custom_plot.yAxis->setRange(-1500, 1500);
     xGraph = custom_plot.addGraph();
@@ -479,6 +484,10 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
     yGraph->setPen(QColor("red"));
     wGraph = custom_plot.addGraph();
     wGraph->setPen(QColor("green"));
+    exGraph = custom_plot.addGraph();
+    exGraph->setPen(QColor("magenta"));
+    ewGraph = custom_plot.addGraph();
+    ewGraph->setPen(QColor("black"));
     custom_plot.resize(signal_frame->size());
     custom_plot.show();
 

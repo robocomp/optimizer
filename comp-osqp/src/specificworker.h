@@ -38,6 +38,7 @@
 #include <doublebuffer/DoubleBuffer.h>
 #include "qcustomplot.h"
 
+
 class MyScene : public QGraphicsScene
 {
     Q_OBJECT
@@ -58,6 +59,30 @@ public:
     bool setParams(RoboCompCommonBehavior::ParameterList params);
     void JoystickAdapter_sendData (RoboCompJoystickAdapter::TData data);
 
+protected:
+
+    void resizeEvent(QResizeEvent * event)
+    {
+        custom_plot.resize(signal_frame->size());
+        graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio);
+    }
+    void closeEvent(QCloseEvent *event)
+    {
+        QSettings settings("reaffer Soft", "reafferApp");
+        settings.beginGroup("MainWindow");
+        settings.setValue("size", size());
+        settings.setValue("pos", pos());
+        settings.endGroup();
+        event->accept();
+    }
+    void readSettings()
+    {
+        QSettings settings("reaffer Soft", "reafferApp");
+        settings.beginGroup("MainWindow");
+        resize(settings.value("size", QSize(400, 400)).toSize());
+        move(settings.value("pos", QPoint(200, 200)).toPoint());
+        settings.endGroup();
+    }
 
 public slots:
 
@@ -98,7 +123,7 @@ private:
 
     // Draw
     QCustomPlot custom_plot;
-    QCPGraph *xGraph, *yGraph, *wGraph;
+    QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph;
     void init_drawing( Grid<>::Dimensions dim);
     float jadv = 0.0; float jrot = 0.0; float jside = 0.0;
     QGraphicsEllipseItem *target_draw = nullptr;
@@ -113,7 +138,7 @@ private:
     using ControlConstraintsMatrix = Eigen::Matrix<double, control_dim, 1>;
     using QMatrix = Eigen::DiagonalMatrix<double, state_dim>;
     using RMatrix = Eigen::DiagonalMatrix<double, control_dim>;
-    using StateSpaceMatrix = Eigen::Matrix<double, state_dim, 1>;
+    using StateSpaceVector = Eigen::Matrix<double, state_dim, 1>;
     using ControlSpaceVector = Eigen::Matrix<double, control_dim, 1>;
 
     const std::uint32_t horizon = 20;
@@ -139,8 +164,8 @@ private:
     RMatrix R;
 
     // allocate the initial and the reference state space
-    StateSpaceMatrix x0;
-    StateSpaceMatrix xRef;
+    StateSpaceVector x0;
+    StateSpaceVector xRef;
 
     // allocate QP problem matrices and vectors
     Eigen::SparseMatrix<double> hessian;
@@ -155,13 +180,13 @@ private:
                                     const ControlConstraintsMatrix &uzero);
     void set_weight_matrices(QMatrix &Q, RMatrix &R);
     void cast_MPC_to_QP_hessian(const QMatrix &Q, const RMatrix &R, int mpcWindow, Eigen::SparseMatrix<double> &hessianMatrix);
-    void cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceMatrix &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient);
-    void update_constraint_vectors(const StateSpaceMatrix &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
+    void cast_MPC_to_QP_gradient(const QMatrix &Q, const StateSpaceVector &xRef, std::uint32_t horizon, Eigen::VectorXd &gradient);
+    void update_constraint_vectors(const StateSpaceVector &x0, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
     void cast_MPC_to_QP_constraint_matrix(const AMatrix &dynamicMatrix, const BMatrix &controlMatrix, std::uint32_t horizon, Eigen::SparseMatrix<double> &constraintMatrix);
     void cast_MPC_to_QP_constraint_vectors(const StateConstraintsMatrix &xMax, const StateConstraintsMatrix &xMin,
                                       const ControlConstraintsMatrix &uMax, const ControlConstraintsMatrix &uMin,
-                                      const StateSpaceMatrix &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
-    double get_error_norm(const StateSpaceMatrix &x, const StateSpaceMatrix &xRef);
+                                      const StateSpaceVector &x0, std::uint32_t horizon, Eigen::VectorXd &lowerBound, Eigen::VectorXd &upperBound);
+    double get_error_norm(const StateSpaceVector &x, const StateSpaceVector &xRef);
     void compute_jacobians(AMatrix &A, BMatrix &B, double u_x, double u_y, double alfa);
 };
 
