@@ -69,6 +69,7 @@ class SpecificWorker(GenericWorker):
         self.hokuyo_base_front_right = VisionSensor("hokuyo_base_front_right")
         self.hokuyo_base_back_right = VisionSensor("hokuyo_base_back_right")
         self.hokuyo_base_back_left = VisionSensor("hokuyo_base_back_left")
+        self.ldata = []
 
         self.joystick_newdata = []
         self.speed_robot = []
@@ -99,13 +100,13 @@ class SpecificWorker(GenericWorker):
     ### LASER get and publish laser data
     ###########################################
     def read_laser(self):
-        ldata = self.compute_omni_laser([self.hokuyo_base_front_right,
+        self.ldata = self.compute_omni_laser([self.hokuyo_base_front_right,
                                          self.hokuyo_base_front_left,
                                          self.hokuyo_base_back_left,
                                          self.hokuyo_base_back_right
                                          ], self.robot)
         try:
-            self.laserpub_proxy.pushLaserData(ldata)
+            self.laserpub_proxy.pushLaserData(self.ldata)
         except Ice.Exception as e:
             print(e)
 
