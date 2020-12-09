@@ -24,6 +24,7 @@ set(CMAKE_CXX_STANDARD 20)
 include_directories($ENV{GUROBI_HOME}/include/)
 
 find_package( Qt5PrintSupport )
+add_definitions(-g  -fmax-errors=5 -std=c++2a )
 
 SET (LIBS ${LIBS} OsqpEigen::OsqpEigen Qt5::PrintSupport)
 

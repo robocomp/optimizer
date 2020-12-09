@@ -49,6 +49,7 @@ class SpecificWorker(GenericWorker):
     def setParams(self, params):
         
         SCENE_FILE = '../etc/viriato_mpc.ttt'
+        #SCENE_FILE = '../etc/viriato_dwa.ttt'
 
         self.pr = PyRep()
         self.pr.launch(SCENE_FILE, headless=False)

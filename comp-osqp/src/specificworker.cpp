@@ -194,9 +194,13 @@ void SpecificWorker::init_optmizer()
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 void SpecificWorker::compute_jacobians(AMatrix &A, BMatrix &B, double u_x, double u_y, double alfa)
 {
-    A <<    1., 0.,  -u_x * sin(alfa) - u_y * cos(alfa),
-            0., 1.,   u_x * cos(alfa) - u_y * sin(alfa),
-            0., 0.,   1. ;
+//    A <<    1., 0.,  -u_x * sin(alfa) - u_y * cos(alfa),
+//            0., 1.,   u_x * cos(alfa) - u_y * sin(alfa),
+//            0., 0.,   1. ;
+
+    A <<    1., 0.,  1,
+            0., 1.,  1,
+            0., 0.,  1 ;
 
     B <<    cos(alfa),  -sin(alfa),   0.,
             sin(alfa),  cos(alfa),    0.,
