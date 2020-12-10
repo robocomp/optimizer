@@ -35,6 +35,7 @@
 #include "grid.cpp"
 #include "grid.h"
 #include "gurobi_c++.h"
+#include "qcustomplot.h"
 
 #define NP 3 // Number of variables for the pose
 #define NV 3 // Number of variables for the velocity
@@ -62,6 +63,30 @@ public slots:
 	void compute();
 	int startup_check();
 	void initialize(int period);
+
+protected:
+    void resizeEvent(QResizeEvent * event)
+    {
+        custom_plot.resize(signal_frame->size());
+        graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio);
+    }
+    void closeEvent(QCloseEvent *event)
+    {
+        QSettings settings("reaffer Soft", "reafferApp");
+        settings.beginGroup("MainWindow");
+        settings.setValue("size", size());
+        settings.setValue("pos", pos());
+        settings.endGroup();
+        event->accept();
+    }
+    void readSettings()
+    {
+        QSettings settings("reaffer Soft", "reafferApp");
+        settings.beginGroup("MainWindow");
+        resize(settings.value("size", QSize(400, 400)).toSize());
+        move(settings.value("pos", QPoint(200, 200)).toPoint());
+        settings.endGroup();
+    }
 
 private:
 	std::shared_ptr < InnerModel > innerModel;
@@ -91,7 +116,12 @@ private:
     QGraphicsItem *robot_polygon = nullptr;
     QGraphicsItem *laser_polygon = nullptr;
 
-	void init_drawing( Grid<>::Dimensions dim);
+    // Draw
+    QCustomPlot custom_plot;
+    QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph;
+    void init_drawing( Grid<>::Dimensions dim);
+    float jadv = 0.0; float jrot = 0.0; float jside = 0.0;
+    QGraphicsEllipseItem *target_draw = nullptr;
 
 	// Model and optimizations
 	GRBEnv *env;
@@ -101,13 +131,10 @@ private:
 	GRBVar *vel_vars;
 	GRBVar *sin_cos_vars;
 	GRBQuadExpr obj;
-
-
     const float ROBOT_LENGTH = 400;
 	void initialize_model();
 	void optimize();
     void fill_grid(const QPolygonF &ldata);
-
 
 };
 
