@@ -34,8 +34,10 @@
 #include <QGraphicsView>
 #include "grid.cpp"
 #include "grid.h"
+#include <Eigen/Dense>
 #include "gurobi_c++.h"
 #include "qcustomplot.h"
+#include <doublebuffer/DoubleBuffer.h>
 
 #define NP 3 // Number of variables for the pose
 #define NV 3 // Number of variables for the velocity
@@ -103,12 +105,15 @@ private:
 	float target_ang;
 	QVec rtarget;
 	bool newTarget;
+    DoubleBuffer<Eigen::Vector2f, Eigen::Vector2f> target_buffer;
+
 
     // path
     std::vector<QPointF> path;
     std::vector<QGraphicsEllipseItem *> path_paint;
     QString path_color = "#FF00FF";
     void draw_path();
+    bool atTarget = true;
 
 	// Grid
 	Grid<> grid;

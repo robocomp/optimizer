@@ -17,13 +17,14 @@ void Grid<T>::initialize(QGraphicsScene* scene,
         readFromFile(file_name);
     else
     {
+        QColor free_color_t(free_color); free_color_t.setAlpha(40);
         for (int i = dim.HMIN; i < dim.HMIN + dim.WIDTH; i += dim.TILE_SIZE)
             for (int j = dim.VMIN; j < dim.VMIN + dim.HEIGHT; j += dim.TILE_SIZE)
             {
                 T t;
                 t.id = count++; t.free = true; t.visited = false;
                 Key k(i, j);
-                t.g_item = scene->addRect(k.x, k.z, 50, 50, QPen(free_color), QBrush(QColor(free_color)));
+                t.g_item = scene->addRect(k.x, k.z, 50, 50, QPen(free_color_t), QBrush(QColor(free_color_t)));
                 fmap.emplace(k, t);
             }
         if(not file_name.empty())

@@ -24,6 +24,7 @@
 SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorker(tprx)
 {
 	this->startup_check_flag = startup_check;
+    readSettings();
 }
 
 /**
@@ -78,52 +79,40 @@ void SpecificWorker::initialize(int period)
 		timer.start(Period);
 }
 
-void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
-{
-    graphicsView->setScene(&scene);
-    graphicsView->setMinimumSize(400,400);
-    scene.setItemIndexMethod(QGraphicsScene::NoIndex);
-    scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
-    graphicsView->scale(1, -1);
-    graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
-    graphicsView->show();
-    connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
-    {
-        qDebug() << "Lambda SLOT: " << e->scenePos();
-        target = QPointF(e->scenePos().x() , e->scenePos().y());
-        newTarget = true;
-        // target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
-        // atTarget = false;
-    });
-
-    //robot
-    QPolygonF poly2;
-    float size = ROBOT_LENGTH / 2.f;
-    poly2 << QPoint(-size, -size)
-          << QPoint(-size, size)
-          << QPoint(-size / 3, size * 1.6)
-          << QPoint(size / 3, size * 1.6)
-          << QPoint(size, size)
-          << QPoint(size, -size);
-    QBrush brush;
-    brush.setColor(QColor("DarkRed"));
-    brush.setStyle(Qt::SolidPattern);
-    robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), brush);
-    robot_polygon->setZValue(5);
-    robot_polygon->setPos(0,0);
-
-}
 
 void SpecificWorker::compute()
 {
+    static int cont=0;
     auto bState = read_base();
     // auto laser_poly = read_laser();
     // fill_grid(laser_poly);
     // auto [x,z,alpha] = state_change(bState, 0.1);  //secs
-    if(newTarget)
+
+    // check for new target
+    if(auto t = target_buffer.try_get(); t.has_value())
+    {
+        // angular reference along line connecting robot and target when clicked
+        float tr_x = t.value().x()-bState.x; float tr_y = t.value().y() - bState.z;
+        target.setX(t.value().x()); target.setY(t.value().y());
+        float ref_ang = -atan2(tr_x, tr_y);   // signo menos para tener ángulos respecto a Y CCW
+
+        // draw
+        if(target_draw) scene.removeItem(target_draw);
+        target_draw = scene.addEllipse(t.value().x()-50, t.value().y()-50, 100, 100, QPen(QColor("green")), QBrush(QColor("green")));
+        auto ex = t.value().x() + 350*sin(-ref_ang);
+        auto ey  =  t.value().y() + 350*cos(-ref_ang);  //OJO signos porque el ang está respecto a Y CCW
+        auto line = scene.addLine(t.value().x(), t.value().y(), ex, ey, QPen(QBrush(QColor("green")), 20));
+        line->setParentItem(target_draw);
+        auto ball = scene.addEllipse(ex-25, ey-25, 50, 50, QPen(QColor("green")), QBrush(QColor("green")));
+        ball->setParentItem(target_draw);
+        cont = 0;
+        xGraph->data()->clear();wGraph->data()->clear();yGraph->data()->clear();exGraph->data()->clear();ewGraph->data()->clear();
+    }
+    if(not atTarget)
     {
         QPointF x0(bState.x, bState.z);
         double pos_error = sqrt(pow(x0.x() - target.x(),2) + pow(x0.y() - target.y(),2));
+        //double rot_error = bState.alpha - );
         rtarget =  innerModel->transform("base", QVec::vec3(target.x(), 0., target.y()), "world");
         target_ang = atan2(rtarget[0], rtarget[2]);
         qDebug()<<"target ang"<<target_ang;
@@ -133,6 +122,7 @@ void SpecificWorker::compute()
             omnirobot_proxy->setSpeedBase(0, 0, 0);
             std::cout << "FINISH" << std::endl;
             newTarget = false;
+            atTarget = true;
         }
         else
         {
@@ -141,6 +131,15 @@ void SpecificWorker::compute()
             float y = vel_vars[1].get(GRB_DoubleAttr_X);
             float a = vel_vars[2].get(GRB_DoubleAttr_X);
             omnirobot_proxy->setSpeedBase(x, y, a);
+
+            // draw
+            xGraph->addData(cont, x);
+            yGraph->addData(cont, x);
+            wGraph->addData(cont, x*300);  // visual scale
+            exGraph->addData(cont, pos_error);
+            //ewGraph->addData(cont, rot_error*300);  // visual scale
+            cont++;
+            custom_plot.replot();
         }
         
         qDebug() << "target from robot" <<rtarget;
@@ -333,6 +332,67 @@ void SpecificWorker::optimize()
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
+void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
+{
+    graphicsView->setScene(&scene);
+    graphicsView->setMinimumSize(400,400);
+    scene.setSceneRect(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT);
+    graphicsView->scale(1, -1);
+    graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio );
+    graphicsView->show();
+    connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
+    {
+        qDebug() << "Lambda SLOT: " << e->scenePos();
+        target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
+        atTarget = false;
+        //target = QPointF(e->scenePos().x() , e->scenePos().y());
+        //newTarget = true;
+    });
+
+    //Draw
+    custom_plot.setParent(signal_frame);
+    custom_plot.xAxis->setLabel("time");
+    custom_plot.yAxis->setLabel("vx-blue vy-red vw-green dist-magenta ew-black");
+    custom_plot.xAxis->setRange(0, 200);
+    custom_plot.yAxis->setRange(-1500, 1500);
+    xGraph = custom_plot.addGraph();
+    xGraph->setPen(QColor("blue"));
+    yGraph = custom_plot.addGraph();
+    yGraph->setPen(QColor("red"));
+    wGraph = custom_plot.addGraph();
+    wGraph->setPen(QColor("green"));
+    exGraph = custom_plot.addGraph();
+    exGraph->setPen(QColor("magenta"));
+    ewGraph = custom_plot.addGraph();
+    ewGraph->setPen(QColor("black"));
+    custom_plot.resize(signal_frame->size());
+    custom_plot.show();
+
+    //robot
+    QPolygonF poly2;
+    float size = ROBOT_LENGTH / 2.f;
+    poly2 << QPoint(-size, -size)
+          << QPoint(-size, size)
+          << QPoint(-size / 3, size * 1.6)
+          << QPoint(size / 3, size * 1.6)
+          << QPoint(size, size)
+          << QPoint(size, -size);
+    QColor rc("DarkRed"); rc.setAlpha(60);
+    robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), QBrush(rc));
+    robot_polygon->setZValue(5);
+    try
+    {
+        RoboCompGenericBase::TBaseState bState;
+        omnirobot_proxy->getBaseState(bState);
+        robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
+        robot_polygon->setPos(bState.x, bState.z);
+    }
+    catch(const Ice::Exception &e){};;
+
+    connect(splitter, &QSplitter::splitterMoved, [this](int pos, int index)
+        {  custom_plot.resize(signal_frame->size()); graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio); });
+}
+
 RoboCompGenericBase::TBaseState SpecificWorker::read_base()
 {
     RoboCompGenericBase::TBaseState bState;

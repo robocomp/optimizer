@@ -472,8 +472,7 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
     connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
     {
         qInfo() << "Lambda SLOT: " << e->scenePos();
-        target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
-        atTarget = false;
+
     });
 
     //Draw
