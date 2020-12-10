@@ -22,8 +22,6 @@
 	@author authorname
 */
 
-
-
 #ifndef SPECIFICWORKER_H
 #define SPECIFICWORKER_H
 
@@ -105,7 +103,7 @@ private:
 	float target_ang;
 	QVec rtarget;
 	bool newTarget;
-    DoubleBuffer<Eigen::Vector2f, Eigen::Vector2f> target_buffer;
+    DoubleBuffer<QPointF, QPointF> target_buffer;
 
 
     // path

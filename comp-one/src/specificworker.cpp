@@ -92,9 +92,11 @@ void SpecificWorker::compute()
     if(auto t = target_buffer.try_get(); t.has_value())
     {
         // angular reference along line connecting robot and target when clicked
-        float tr_x = t.value().x()-bState.x; float tr_y = t.value().y() - bState.z;
-        target.setX(t.value().x()); target.setY(t.value().y());
+        float tr_x = t.value().x() - bState.x; float tr_y = t.value().y() - bState.z;
         float ref_ang = -atan2(tr_x, tr_y);   // signo menos para tener ángulos respecto a Y CCW
+
+        //set target
+        target.setX(t.value().x()); target.setY(t.value().y());
 
         // draw
         if(target_draw) scene.removeItem(target_draw);
@@ -134,10 +136,9 @@ void SpecificWorker::compute()
 
             // draw
             xGraph->addData(cont, x);
-            yGraph->addData(cont, x);
-            wGraph->addData(cont, x*300);  // visual scale
+            yGraph->addData(cont, y);
+            wGraph->addData(cont, a*300);
             exGraph->addData(cont, pos_error);
-            //ewGraph->addData(cont, rot_error*300);  // visual scale
             cont++;
             custom_plot.replot();
         }
@@ -328,7 +329,6 @@ void SpecificWorker::optimize()
     //     cout << vel_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
     //      << y << endl;
     // }
-
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -343,10 +343,8 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
     connect(&scene, &MyScene::new_target, this, [this](QGraphicsSceneMouseEvent *e)
     {
         qDebug() << "Lambda SLOT: " << e->scenePos();
-        target_buffer.put(Eigen::Vector2f ( e->scenePos().x() , e->scenePos().y()));
+        target_buffer.put(e->scenePos());
         atTarget = false;
-        //target = QPointF(e->scenePos().x() , e->scenePos().y());
-        //newTarget = true;
     });
 
     //Draw
@@ -377,7 +375,7 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
           << QPoint(size / 3, size * 1.6)
           << QPoint(size, size)
           << QPoint(size, -size);
-    QColor rc("DarkRed"); rc.setAlpha(60);
+    QColor rc("DarkRed"); rc.setAlpha(80);
     robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), QBrush(rc));
     robot_polygon->setZValue(5);
     try
