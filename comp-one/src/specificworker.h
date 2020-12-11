@@ -118,7 +118,7 @@ private:
 	Grid<> grid;
     MyScene scene;
     QGraphicsItem *robot_polygon = nullptr;
-    QGraphicsItem *laser_polygon = nullptr;
+
 
     // Draw
     QCustomPlot custom_plot;
@@ -127,7 +127,7 @@ private:
     float jadv = 0.0; float jrot = 0.0; float jside = 0.0;
     QGraphicsEllipseItem *target_draw = nullptr;
     void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
-    QPolygonF draw_laser(const RoboCompLaser::TLaserData &ldata);
+    void draw_laser(const QPolygonF &poly);
 
 	// Model and optimizations
 	GRBEnv *env;
@@ -143,8 +143,8 @@ private:
     void fill_grid(const QPolygonF &ldata);
 
     // convex parrtitions
-
-    void compute_laser_particions(QPolygonF  &laser_poly);
+    using Line = std::vector<std::tuple<float, float, float>>;
+    std::vector<Line> compute_laser_partitions(QPolygonF  &laser_poly);
     double PerpendicularDistance(const Point &pt, const Point &lineStart, const Point &lineEnd);
     void RamerDouglasPeucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
 

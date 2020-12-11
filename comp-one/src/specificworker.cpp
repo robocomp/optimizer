@@ -18,6 +18,7 @@
  */
 #include "specificworker.h"
 #include <cppitertools/enumerate.hpp>
+#include <ranges>
 
 /**
 * \brief Default constructor
@@ -80,9 +81,16 @@ void SpecificWorker::compute()
 {
     auto bState = read_base();
     auto laser_poly = read_laser();
-    compute_laser_particions(laser_poly);
+    draw_laser(laser_poly);
+    auto lines = compute_laser_partitions(laser_poly);
+    qInfo() << "--------- LINES ------------";
+    for(auto &ll : lines)
+    {
+        for (auto &[a, b, c] : ll)
+            qInfo() << a << b << c;
+        qInfo() << "-----------------------";
+    }
     // fill_grid(laser_poly);
-    // auto [x,z,alpha] = state_change(bState, 0.1);  //secs
 
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
@@ -130,50 +138,60 @@ void SpecificWorker::compute()
 
     }
     draw_path();
-    //qInfo() << bState.x << bState.z << bState.alpha;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void SpecificWorker::compute_laser_particions(QPolygonF  &laser_poly)
+std::vector<SpecificWorker::Line> SpecificWorker::compute_laser_partitions(QPolygonF  &laser_poly)
 {
     TPPLPartition partition;
-    TPPLPoly poly;
+    TPPLPoly poly_part;
     TPPLPolyList parts;
 
-    poly.Init(laser_poly.size());
-    poly.SetHole(false);
+    poly_part.Init(laser_poly.size());
+    poly_part.SetHole(false);
     for(auto &&[i, l] : iter::enumerate(laser_poly))
     {
-        poly[i].x = l.x();
-        poly[i].y = l.y();
+        poly_part[i].x = l.x();
+        poly_part[i].y = l.y();
     }
-    poly.SetOrientation(TPPL_CCW);
+    poly_part.SetOrientation(TPPL_CCW);
     //int r = partition.ConvexPartition_HM(&poly, &parts);
     //int r = partition.Triangulate_OPT(&poly, &parts);
-    int r = partition.ConvexPartition_OPT(&poly, &parts);
-    qInfo() << r << parts.size() << poly.GetNumPoints();
+    int r = partition.ConvexPartition_OPT(&poly_part, &parts);
+    qInfo() << __FUNCTION__ << "Ok: " << r << "Num vertices:" << poly_part.GetNumPoints() << "Num res polys: " << parts.size();
 
-    static std::vector<QGraphicsLineItem*> lines;
-    static std::vector<QGraphicsPolygonItem *> polys_ptr;
-    for(auto &l:lines)
-        scene.removeItem(l);
-    lines.clear();
+    static std::vector<QGraphicsPolygonItem *> polys_ptr{};
     for(auto p: polys_ptr)
         scene.removeItem(p);
     polys_ptr.clear();
-    for(auto &p : parts)
+
+    std::vector<Line> lines_vector;
+    for(auto &poly_res : parts)
     {
-        QColor color; color.setRgb(qrand()%255, qrand()%255, qrand()%255);
-        QPolygonF polygon;
-        for (int i = 0; i < p.GetNumPoints(); i++)
-        {
-            auto p1 = p.GetPoint(i);
-            //lines.push_back(scene.addLine(p1.x, p1.y, p2.x, p2.y, QPen(color, 30)));
-            polygon << QPointF(p1.x,p1.y);
-        }
-        polys_ptr.push_back(scene.addPolygon(polygon, QPen(color, 30), QBrush(color)));
+        QColor color;
+        color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
+        auto num_points = poly_res.GetNumPoints();
+        QPolygonF poly_draw(num_points);
+        std::generate(poly_draw.begin(), poly_draw.end(), [poly_res, k=0]() mutable
+                        {
+                            auto &p = poly_res.GetPoint(k++);
+                            return QPointF(p.x, p.y);
+                        });
+        polys_ptr.push_back(scene.addPolygon(poly_draw, QPen(color, 30), QBrush(color)));
+
+        Line line(num_points);
+        std::generate(line.begin(), line.end(),[poly_res, k=0, num_points]() mutable
+                        {
+                          float x1 = poly_res.GetPoint(k).x;
+                          float y1 = poly_res.GetPoint(k).y;
+                          float x2 = poly_res.GetPoint((++k) % num_points).x;
+                          float y2 = poly_res.GetPoint((k) % num_points).y;
+                          return std::make_tuple(y1 - y2, x2 - x1, (x1 - x2) * y1 + (y2 - y1) * x1);
+                        });
+        lines_vector.push_back(line);
     }
+    return lines_vector;
 }
 
 void SpecificWorker::initialize_model()
@@ -301,7 +319,6 @@ void SpecificWorker::initialize_model()
         //obj += (pose_vars[e*2+1]-pose_vars[(e+1)*2+1])*(pose_vars[e*2+1]-pose_vars[(e+1)*2+1]);
     }
     model->update();
-
 }
 void SpecificWorker::optimize()
 {
@@ -440,31 +457,20 @@ QPolygonF SpecificWorker::read_laser()
     try
     {
         auto ldata = laser_proxy->getLaserData();
-        laser_poly = draw_laser(ldata);
+
+        // simplify laser contour with Ramer-Douglas-Peucker
+        std::vector<Point> plist(ldata.size());
+        std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable
+                    { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
+        vector<Point> pointListOut;
+        RamerDouglasPeucker(plist, 50, pointListOut);
+        laser_poly.resize(pointListOut.size());
+        std::generate(laser_poly.begin(), laser_poly.end(), [pointListOut, this, k=0]() mutable
+                    { auto &p = pointListOut[k++]; return robot_polygon->mapToScene(QPointF(p.first, p.second));});
     }
     catch(const Ice::Exception &e)
-    { std::cout << "Error reading from Camera" << e << std::endl;}
+    { std::cout << "Error reading from Laser" << e << std::endl;}
     return laser_poly;
-}
-
-std::tuple<float,float,float> SpecificWorker::state_change( const RoboCompGenericBase::TBaseState &bState, float delta_t)
-{
-    float rot = bState.rotV;
-    float adv = bState.advVz;
-
-    if (fabs(rot) > 0.05)
-    {
-        float r = adv / rot; //radio
-        float x = r - r * cos(rot * delta_t);
-        float z = r * sin(rot * delta_t);
-        QVec res =  innerModel->transform6D("world", QVec::vec6(x, 0, z, 0, rot * delta_t, 0), "base");
-        return std::make_tuple(res.x(), res.z(), res.ry());
-    }
-    else
-    {
-        QVec res = innerModel->transform6D("world", QVec::vec6(0, 0,adv * delta_t, 0, 0, 0), "base");
-        return std::make_tuple(res.x(), res.z(), res.ry());
-    }
 }
 
 void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
@@ -477,27 +483,16 @@ void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
     grid.draw(&scene);
 }
 
-QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
+void SpecificWorker::draw_laser(const QPolygonF &poly)
 {
+    static QGraphicsItem *laser_polygon = nullptr;
     if (laser_polygon != nullptr)
         scene.removeItem(laser_polygon);
 
-    // simplify laser polycon with RamerDouglasPeucker
-    std::vector<Point> plist(ldata.size());
-    std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
-    vector<Point> pointListOut;
-    RamerDouglasPeucker(plist, 10, pointListOut);
-
     QColor color("LightGreen");
     color.setAlpha(40);
-    QPolygonF poly(pointListOut.size());
-    //    QPolygonF poly(ldata.size());
-    std::generate(poly.begin(), poly.end(), [pointListOut, this, k=0]() mutable
-        { auto &p = pointListOut[k++]; return robot_polygon->mapToScene(QPointF(p.first, p.second));});
-    //std::generate(poly.begin(), poly.end(), [ldata, k=0]() mutable { auto &l = ldata[k++]; return QPointF(l.dist * sin(l.angle), l.dist * cos(l.angle));});
     laser_polygon = scene.addPolygon(poly, QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(3);
-    return poly;
 }
 
 void SpecificWorker::draw_path()
@@ -604,6 +599,7 @@ void SpecificWorker::RamerDouglasPeucker(const vector<Point> &pointList, double 
         out.push_back(pointList[end]);
     }
 }
+
 ///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {

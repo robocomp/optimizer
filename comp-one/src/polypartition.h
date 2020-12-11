@@ -30,46 +30,40 @@ typedef double tppl_float;
 #define TPPL_CW -1
 
 //2D point structure
-struct TPPLPoint {
+struct TPPLPoint
+{
     tppl_float x;
     tppl_float y;
     // User-specified vertex identifier.  Note that this isn't used internally
-    // by the library, but will be faithfully copied around.
     int id;
-    
     TPPLPoint operator + (const TPPLPoint& p) const {
         TPPLPoint r;
         r.x = x + p.x;
         r.y = y + p.y;
         return r;
     }
-    
     TPPLPoint operator - (const TPPLPoint& p) const {
         TPPLPoint r;
         r.x = x - p.x;
         r.y = y - p.y;
         return r;
     }
-    
     TPPLPoint operator * (const tppl_float f ) const {
         TPPLPoint r;
         r.x = x*f;
         r.y = y*f;
         return r;
     }
-    
     TPPLPoint operator / (const tppl_float f ) const {
         TPPLPoint r;
         r.x = x/f;
         r.y = y/f;
         return r;
     }
-    
     bool operator==(const TPPLPoint& p) const {
         if((x == p.x)&&(y==p.y)) return true;
         else return false;
     }
-    
     bool operator!=(const TPPLPoint& p) const {
         if((x == p.x)&&(y==p.y)) return false;
         else return true;
@@ -78,9 +72,9 @@ struct TPPLPoint {
 
 
 //Polygon implemented as an array of points with a 'hole' flag
-class TPPLPoly {
+class TPPLPoly
+{
     protected:
-        
         TPPLPoint *points;
         long numpoints;
         bool hole;
