@@ -477,7 +477,7 @@ QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
     std::vector<Point> plist(ldata.size());
     std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
     vector<Point> pointListOut;
-    RamerDouglasPeucker(plist, 1.0, pointListOut);
+    RamerDouglasPeucker(plist, 10, pointListOut);
 
     QColor color("LightGreen");
     color.setAlpha(40);
@@ -486,7 +486,7 @@ QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
     std::generate(poly.begin(), poly.end(), [pointListOut, this, k=0]() mutable
         { auto &p = pointListOut[k++]; return robot_polygon->mapToScene(QPointF(p.first, p.second));});
     //std::generate(poly.begin(), poly.end(), [ldata, k=0]() mutable { auto &l = ldata[k++]; return QPointF(l.dist * sin(l.angle), l.dist * cos(l.angle));});
-    laser_polygon = scene.addPolygon(poly, QPen(color), QBrush(color));
+    laser_polygon = scene.addPolygon(poly, QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(3);
     return poly;
 }
@@ -530,9 +530,7 @@ double SpecificWorker::PerpendicularDistance(const Point &pt, const Point &lineS
     //Normalise
     double mag = pow(pow(dx,2.0)+pow(dy,2.0),0.5);
     if(mag > 0.0)
-    {
         dx /= mag; dy /= mag;
-    }
 
     double pvx = pt.first - lineStart.first;
     double pvy = pt.second - lineStart.second;
@@ -569,7 +567,6 @@ void SpecificWorker::RamerDouglasPeucker(const vector<Point> &pointList, double 
             dmax = d;
         }
     }
-
     // If max distance is greater than epsilon, recursively simplify
     if(dmax > epsilon)
     {
