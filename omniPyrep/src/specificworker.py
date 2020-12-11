@@ -185,9 +185,10 @@ class SpecificWorker(GenericWorker):
             ldata[p].dist = int(m*1000)   # to millimeters
         if ldata[0] == 0:
             ldata[0] = 200       #half robot width
-        for i in range(1, len(ldata)):
+        for i in range(0, len(ldata)):
             if ldata[i].dist == 0:
                 ldata[i].dist = ldata[i-1].dist
+        #ldata[0].dist = ldata[len(data)-1].dist
 
         return ldata
     

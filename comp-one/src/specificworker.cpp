@@ -80,6 +80,7 @@ void SpecificWorker::compute()
 {
     auto bState = read_base();
     auto laser_poly = read_laser();
+    compute_laser_particions(laser_poly);
     // fill_grid(laser_poly);
     // auto [x,z,alpha] = state_change(bState, 0.1);  //secs
 
@@ -109,8 +110,6 @@ void SpecificWorker::compute()
         }
         else
         {
-            compute_laser_particions(laser_poly);
-
             optimize();
             float x = vel_vars[0].get(GRB_DoubleAttr_X);
             float y = vel_vars[1].get(GRB_DoubleAttr_X);
@@ -150,21 +149,31 @@ void SpecificWorker::compute_laser_particions(QPolygonF  &laser_poly)
         poly[i].y = l.y();
     }
     poly.SetOrientation(TPPL_CCW);
-    int r = partition.ConvexPartition_HM(&poly, &parts);
+    //int r = partition.ConvexPartition_HM(&poly, &parts);
     //int r = partition.Triangulate_OPT(&poly, &parts);
+    int r = partition.ConvexPartition_OPT(&poly, &parts);
     qInfo() << r << parts.size() << poly.GetNumPoints();
 
-//    static std::vector<QGraphicsLineItem*> lines;
-//    for(auto &l:lines)
-//        scene.removeItem(l);
-//    lines.clear();
-//    for(auto &p : parts)
-//        for(int i=0; i<p.GetNumPoints(); i++)
-//        {
-//            auto p1 = p.GetPoint(i);
-//            auto p2 = p.GetPoint((i+1)%poly.GetNumPoints());
-//            lines.push_back(scene.addLine(p1.x,p1.y,p2.x,p2.y, QPen(QColor("magenta"), 30)));
-//        }
+    static std::vector<QGraphicsLineItem*> lines;
+    static std::vector<QGraphicsPolygonItem *> polys_ptr;
+    for(auto &l:lines)
+        scene.removeItem(l);
+    lines.clear();
+    for(auto p: polys_ptr)
+        scene.removeItem(p);
+    polys_ptr.clear();
+    for(auto &p : parts)
+    {
+        QColor color; color.setRgb(qrand()%255, qrand()%255, qrand()%255);
+        QPolygonF polygon;
+        for (int i = 0; i < p.GetNumPoints(); i++)
+        {
+            auto p1 = p.GetPoint(i);
+            //lines.push_back(scene.addLine(p1.x, p1.y, p2.x, p2.y, QPen(color, 30)));
+            polygon << QPointF(p1.x,p1.y);
+        }
+        polys_ptr.push_back(scene.addPolygon(polygon, QPen(color, 30), QBrush(color)));
+    }
 }
 
 void SpecificWorker::initialize_model()
@@ -530,7 +539,10 @@ double SpecificWorker::PerpendicularDistance(const Point &pt, const Point &lineS
     //Normalise
     double mag = pow(pow(dx,2.0)+pow(dy,2.0),0.5);
     if(mag > 0.0)
-        dx /= mag; dy /= mag;
+    {
+        dx /= mag;
+        dy /= mag;
+    }
 
     double pvx = pt.first - lineStart.first;
     double pvy = pt.second - lineStart.second;
