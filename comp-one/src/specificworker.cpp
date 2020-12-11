@@ -83,13 +83,13 @@ void SpecificWorker::compute()
     auto laser_poly = read_laser();
     draw_laser(laser_poly);
     auto lines = compute_laser_partitions(laser_poly);
-    qInfo() << "--------- LINES ------------";
-    for(auto &ll : lines)
-    {
-        for (auto &[a, b, c] : ll)
-            qInfo() << a << b << c;
-        qInfo() << "-----------------------";
-    }
+//    qInfo() << "--------- LINES ------------";
+//    for(auto &ll : lines)
+//    {
+//        for (auto &[a, b, c] : ll)
+//            qInfo() << a << b << c;
+//        qInfo() << "-----------------------";
+//    }
     // fill_grid(laser_poly);
 
     // check for new target
@@ -165,11 +165,10 @@ std::vector<SpecificWorker::Line> SpecificWorker::compute_laser_partitions(QPoly
     for(auto p: polys_ptr)
         scene.removeItem(p);
     polys_ptr.clear();
-
+    QColor color;
     std::vector<Line> lines_vector;
     for(auto &poly_res : parts)
     {
-        QColor color;
         color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
         auto num_points = poly_res.GetNumPoints();
         QPolygonF poly_draw(num_points);
@@ -526,77 +525,48 @@ void SpecificWorker::draw_target(const RoboCompGenericBase::TBaseState &bState, 
     ewGraph->data()->clear();
 }
 
-double SpecificWorker::PerpendicularDistance(const Point &pt, const Point &lineStart, const Point &lineEnd)
-{
-    double dx = lineEnd.first - lineStart.first;
-    double dy = lineEnd.second - lineStart.second;
-
-    //Normalise
-    double mag = pow(pow(dx,2.0)+pow(dy,2.0),0.5);
-    if(mag > 0.0)
-    {
-        dx /= mag;
-        dy /= mag;
-    }
-
-    double pvx = pt.first - lineStart.first;
-    double pvy = pt.second - lineStart.second;
-
-    //Get dot product (project pv onto normalized direction)
-    double pvdot = dx * pvx + dy * pvy;
-
-    //Scale line direction vector
-    double dsx = pvdot * dx;
-    double dsy = pvdot * dy;
-
-    //Subtract this from pv
-    double ax = pvx - dsx;
-    double ay = pvy - dsy;
-
-    return pow(pow(ax,2.0)+pow(ay,2.0),0.5);
-}
-
 void SpecificWorker::RamerDouglasPeucker(const vector<Point> &pointList, double epsilon, vector<Point> &out)
 {
     if(pointList.size()<2)
-        throw invalid_argument("Not enough points to simplify");
+    {
+        qWarning() << "Not enough points to simplify";
+        return;
+    }
 
     // Find the point with the maximum distance from line between start and end
-    double dmax = 0.0;
-    size_t index = 0;
-    size_t end = pointList.size()-1;
-    for(size_t i = 1; i < end; i++)
-    {
-        double d = PerpendicularDistance(pointList[i], pointList[0], pointList[end]);
-        if (d > dmax)
-        {
-            index = i;
-            dmax = d;
-        }
-    }
+    auto line = Eigen::ParametrizedLine<float, 2>::Through(Eigen::Vector2f(pointList.front().first,pointList.front().second),
+                                                           Eigen::Vector2f(pointList.back().first,pointList.back().second));
+    auto max = std::max_element(pointList.begin()+1, pointList.end(), [line](auto &a, auto &b)
+                { return line.distance(Eigen::Vector2f(a.first, a.second)) < line.distance(Eigen::Vector2f(b.first, b.second));});
+    float dmax =  line.distance(Eigen::Vector2f((*max).first, (*max).second));
+
     // If max distance is greater than epsilon, recursively simplify
     if(dmax > epsilon)
     {
         // Recursive call
         vector<Point> recResults1;
         vector<Point> recResults2;
-        vector<Point> firstLine(pointList.begin(), pointList.begin()+index+1);
-        vector<Point> lastLine(pointList.begin()+index, pointList.end());
+        vector<Point> firstLine(pointList.begin(), max + 1);
+        vector<Point> lastLine(max, pointList.end());
+
         RamerDouglasPeucker(firstLine, epsilon, recResults1);
         RamerDouglasPeucker(lastLine, epsilon, recResults2);
 
         // Build the result list
-        out.assign(recResults1.begin(), recResults1.end()-1);
+        out.assign(recResults1.begin(), recResults1.end() - 1);
         out.insert(out.end(), recResults2.begin(), recResults2.end());
-        if(out.size()<2)
-            throw runtime_error("Problem assembling output");
+        if (out.size() < 2)
+        {
+            qWarning() << "Problem assembling output";
+            return;
+        }
     }
     else
     {
         //Just return start and end points
         out.clear();
-        out.push_back(pointList[0]);
-        out.push_back(pointList[end]);
+        out.push_back(pointList.front());
+        out.push_back(pointList.back());
     }
 }
 
