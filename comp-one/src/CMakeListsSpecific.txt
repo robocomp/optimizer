@@ -5,6 +5,7 @@ SET ( SOURCES
   specificmonitor.cpp
   grid.cpp
   qcustomplot.cpp
+  polypartition.cpp
 )
 
 # Headers set

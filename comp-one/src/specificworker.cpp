@@ -17,6 +17,7 @@
  *    along with RoboComp.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "specificworker.h"
+#include <cppitertools/enumerate.hpp>
 
 /**
 * \brief Default constructor
@@ -60,11 +61,6 @@ void SpecificWorker::initialize(int period)
     //view
     init_drawing(dim);
 
-    // target
-    target = QPointF(0, 2000);
-    target_ang = 0.;
-    newTarget = false;
-
     // path
     for(auto i : iter::range(0, 2100, 250))
         path.emplace_back(QPointF(100 - qrand()%200, i));
@@ -82,39 +78,24 @@ void SpecificWorker::initialize(int period)
 
 void SpecificWorker::compute()
 {
-    static int cont=0;
     auto bState = read_base();
-    // auto laser_poly = read_laser();
+    auto laser_poly = read_laser();
     // fill_grid(laser_poly);
     // auto [x,z,alpha] = state_change(bState, 0.1);  //secs
 
     // check for new target
     if(auto t = target_buffer.try_get(); t.has_value())
     {
-        // angular reference along line connecting robot and target when clicked
-        float tr_x = t.value().x() - bState.x; float tr_y = t.value().y() - bState.z;
-        float ref_ang = -atan2(tr_x, tr_y);   // signo menos para tener ángulos respecto a Y CCW
-
         //set target
         target.setX(t.value().x()); target.setY(t.value().y());
 
         // draw
-        if(target_draw) scene.removeItem(target_draw);
-        target_draw = scene.addEllipse(t.value().x()-50, t.value().y()-50, 100, 100, QPen(QColor("green")), QBrush(QColor("green")));
-        auto ex = t.value().x() + 350*sin(-ref_ang);
-        auto ey  =  t.value().y() + 350*cos(-ref_ang);  //OJO signos porque el ang está respecto a Y CCW
-        auto line = scene.addLine(t.value().x(), t.value().y(), ex, ey, QPen(QBrush(QColor("green")), 20));
-        line->setParentItem(target_draw);
-        auto ball = scene.addEllipse(ex-25, ey-25, 50, 50, QPen(QColor("green")), QBrush(QColor("green")));
-        ball->setParentItem(target_draw);
-        cont = 0;
-        xGraph->data()->clear();wGraph->data()->clear();yGraph->data()->clear();exGraph->data()->clear();ewGraph->data()->clear();
+        draw_target(bState, t.value());
     }
     if(not atTarget)
     {
         QPointF x0(bState.x, bState.z);
         double pos_error = sqrt(pow(x0.x() - target.x(),2) + pow(x0.y() - target.y(),2));
-        //double rot_error = bState.alpha - );
         rtarget =  innerModel->transform("base", QVec::vec3(target.x(), 0., target.y()), "world");
         target_ang = atan2(rtarget[0], rtarget[2]);
         qDebug()<<"target ang"<<target_ang;
@@ -128,6 +109,8 @@ void SpecificWorker::compute()
         }
         else
         {
+            compute_laser_particions(laser_poly);
+
             optimize();
             float x = vel_vars[0].get(GRB_DoubleAttr_X);
             float y = vel_vars[1].get(GRB_DoubleAttr_X);
@@ -139,6 +122,7 @@ void SpecificWorker::compute()
             yGraph->addData(cont, y);
             wGraph->addData(cont, a*300);
             exGraph->addData(cont, pos_error);
+            ewGraph->addData(cont,atan2(target.x() - bState.x, target.y() - bState.z) - bState.alpha);
             cont++;
             custom_plot.replot();
         }
@@ -148,6 +132,39 @@ void SpecificWorker::compute()
     }
     draw_path();
     //qInfo() << bState.x << bState.z << bState.alpha;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void SpecificWorker::compute_laser_particions(QPolygonF  &laser_poly)
+{
+    TPPLPartition partition;
+    TPPLPoly poly;
+    TPPLPolyList parts;
+
+    poly.Init(laser_poly.size());
+    poly.SetHole(false);
+    for(auto &&[i, l] : iter::enumerate(laser_poly))
+    {
+        poly[i].x = l.x();
+        poly[i].y = l.y();
+    }
+    poly.SetOrientation(TPPL_CCW);
+    int r = partition.ConvexPartition_HM(&poly, &parts);
+    //int r = partition.Triangulate_OPT(&poly, &parts);
+    qInfo() << r << parts.size() << poly.GetNumPoints();
+
+//    static std::vector<QGraphicsLineItem*> lines;
+//    for(auto &l:lines)
+//        scene.removeItem(l);
+//    lines.clear();
+//    for(auto &p : parts)
+//        for(int i=0; i<p.GetNumPoints(); i++)
+//        {
+//            auto p1 = p.GetPoint(i);
+//            auto p2 = p.GetPoint((i+1)%poly.GetNumPoints());
+//            lines.push_back(scene.addLine(p1.x,p1.y,p2.x,p2.y, QPen(QColor("magenta"), 30)));
+//        }
 }
 
 void SpecificWorker::initialize_model()
@@ -456,12 +473,19 @@ QPolygonF SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata)
     if (laser_polygon != nullptr)
         scene.removeItem(laser_polygon);
 
-    QPolygonF poly;
-    for( auto &l : ldata)
-        poly << robot_polygon->mapToScene(QPointF(l.dist * sin(l.angle), l.dist * cos(l.angle)));
+    // simplify laser polycon with RamerDouglasPeucker
+    std::vector<Point> plist(ldata.size());
+    std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
+    vector<Point> pointListOut;
+    RamerDouglasPeucker(plist, 1.0, pointListOut);
 
     QColor color("LightGreen");
     color.setAlpha(40);
+    QPolygonF poly(pointListOut.size());
+    //    QPolygonF poly(ldata.size());
+    std::generate(poly.begin(), poly.end(), [pointListOut, this, k=0]() mutable
+        { auto &p = pointListOut[k++]; return robot_polygon->mapToScene(QPointF(p.first, p.second));});
+    //std::generate(poly.begin(), poly.end(), [ldata, k=0]() mutable { auto &l = ldata[k++]; return QPointF(l.dist * sin(l.angle), l.dist * cos(l.angle));});
     laser_polygon = scene.addPolygon(poly, QPen(color), QBrush(color));
     laser_polygon->setZValue(3);
     return poly;
@@ -476,6 +500,101 @@ void SpecificWorker::draw_path()
         path_paint.push_back(scene.addEllipse(p.x()-25, p.y()-25, 50 , 50, QPen(path_color), QBrush(QColor(path_color))));
 }
 
+void SpecificWorker::draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t)
+{
+    if (target_draw) scene.removeItem(target_draw);
+    target_draw = scene.addEllipse(t.x() - 50, t.y() - 50, 100, 100, QPen(QColor("green")), QBrush(QColor("green")));
+    // angular reference obtained from line joinning robot an target when  clicking
+    float tr_x = t.x() - bState.x;
+    float tr_y = t.y() - bState.z;
+    float ref_ang = -atan2(tr_x, tr_y);   // signo menos para tener ángulos respecto a Y CCW
+    auto ex = t.x() + 350 * sin(-ref_ang);
+    auto ey = t.y() + 350 * cos(-ref_ang);  //OJO signos porque el ang está respecto a Y CCW
+    auto line = scene.addLine(t.x(), t.y(), ex, ey, QPen(QBrush(QColor("green")), 20));
+    line->setParentItem(target_draw);
+    auto ball = scene.addEllipse(ex - 25, ey - 25, 50, 50, QPen(QColor("green")), QBrush(QColor("green")));
+    ball->setParentItem(target_draw);
+    cont = 0;
+    xGraph->data()->clear();
+    wGraph->data()->clear();
+    yGraph->data()->clear();
+    exGraph->data()->clear();
+    ewGraph->data()->clear();
+}
+
+double SpecificWorker::PerpendicularDistance(const Point &pt, const Point &lineStart, const Point &lineEnd)
+{
+    double dx = lineEnd.first - lineStart.first;
+    double dy = lineEnd.second - lineStart.second;
+
+    //Normalise
+    double mag = pow(pow(dx,2.0)+pow(dy,2.0),0.5);
+    if(mag > 0.0)
+    {
+        dx /= mag; dy /= mag;
+    }
+
+    double pvx = pt.first - lineStart.first;
+    double pvy = pt.second - lineStart.second;
+
+    //Get dot product (project pv onto normalized direction)
+    double pvdot = dx * pvx + dy * pvy;
+
+    //Scale line direction vector
+    double dsx = pvdot * dx;
+    double dsy = pvdot * dy;
+
+    //Subtract this from pv
+    double ax = pvx - dsx;
+    double ay = pvy - dsy;
+
+    return pow(pow(ax,2.0)+pow(ay,2.0),0.5);
+}
+
+void SpecificWorker::RamerDouglasPeucker(const vector<Point> &pointList, double epsilon, vector<Point> &out)
+{
+    if(pointList.size()<2)
+        throw invalid_argument("Not enough points to simplify");
+
+    // Find the point with the maximum distance from line between start and end
+    double dmax = 0.0;
+    size_t index = 0;
+    size_t end = pointList.size()-1;
+    for(size_t i = 1; i < end; i++)
+    {
+        double d = PerpendicularDistance(pointList[i], pointList[0], pointList[end]);
+        if (d > dmax)
+        {
+            index = i;
+            dmax = d;
+        }
+    }
+
+    // If max distance is greater than epsilon, recursively simplify
+    if(dmax > epsilon)
+    {
+        // Recursive call
+        vector<Point> recResults1;
+        vector<Point> recResults2;
+        vector<Point> firstLine(pointList.begin(), pointList.begin()+index+1);
+        vector<Point> lastLine(pointList.begin()+index, pointList.end());
+        RamerDouglasPeucker(firstLine, epsilon, recResults1);
+        RamerDouglasPeucker(lastLine, epsilon, recResults2);
+
+        // Build the result list
+        out.assign(recResults1.begin(), recResults1.end()-1);
+        out.insert(out.end(), recResults2.begin(), recResults2.end());
+        if(out.size()<2)
+            throw runtime_error("Problem assembling output");
+    }
+    else
+    {
+        //Just return start and end points
+        out.clear();
+        out.push_back(pointList[0]);
+        out.push_back(pointList[end]);
+    }
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {

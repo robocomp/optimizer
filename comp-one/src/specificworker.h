@@ -36,6 +36,7 @@
 #include "gurobi_c++.h"
 #include "qcustomplot.h"
 #include <doublebuffer/DoubleBuffer.h>
+#include "polypartition.h"
 
 #define NP 3 // Number of variables for the pose
 #define NV 3 // Number of variables for the velocity
@@ -50,6 +51,7 @@ protected:
     { emit new_target(event); }
 };
 
+typedef std::pair<double, double> Point;
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
@@ -91,8 +93,7 @@ protected:
 private:
 	std::shared_ptr < InnerModel > innerModel;
 	bool startup_check_flag;
-	QPolygonF draw_laser(const RoboCompLaser::TLaserData &ldata);
-	QPolygonF read_laser();
+    QPolygonF read_laser();
 	RoboCompGenericBase::TBaseState read_base();
 
 	// robot
@@ -104,7 +105,7 @@ private:
 	QVec rtarget;
 	bool newTarget;
     DoubleBuffer<QPointF, QPointF> target_buffer;
-
+    int cont=0;
 
     // path
     std::vector<QPointF> path;
@@ -125,6 +126,8 @@ private:
     void init_drawing( Grid<>::Dimensions dim);
     float jadv = 0.0; float jrot = 0.0; float jside = 0.0;
     QGraphicsEllipseItem *target_draw = nullptr;
+    void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
+    QPolygonF draw_laser(const RoboCompLaser::TLaserData &ldata);
 
 	// Model and optimizations
 	GRBEnv *env;
@@ -138,6 +141,12 @@ private:
 	void initialize_model();
 	void optimize();
     void fill_grid(const QPolygonF &ldata);
+
+    // convex parrtitions
+
+    void compute_laser_particions(QPolygonF  &laser_poly);
+    double PerpendicularDistance(const Point &pt, const Point &lineStart, const Point &lineEnd);
+    void RamerDouglasPeucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
 
 };
 
