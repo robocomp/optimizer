@@ -97,7 +97,7 @@ void SpecificWorker::compute()
         QPointF x0(bState.x, bState.z);
         double pos_error = sqrt(pow(x0.x() - target.x(),2) + pow(x0.y() - target.y(),2));
         rtarget =  innerModel->transform("base", QVec::vec3(target.x(), 0., target.y()), "world");
-        target_ang = atan2(rtarget[0], rtarget[2]);
+        target_ang = -atan2(rtarget[0], rtarget[2]);
         qDebug()<<"target ang"<<target_ang;
         //double rot_error = sqrt(pow(x0.z() - xRef.z(),2));
         if (pos_error < 40)
@@ -233,7 +233,7 @@ void SpecificWorker::initialize_model()
     model->addConstr(pose_vars[2] == 0, "c0a");
     model->addConstr(pose_vars[(np-1)*NP] == target.x(), "c1x");
     model->addConstr(pose_vars[(np-1)*NP+1] == target.y(), "c1y");
-    model->addConstr(pose_vars[(np-1)*NP+2] == target_ang, "c1a");
+    model->addConstr(pose_vars[(np/2-1)*NP+2] == target_ang, "c1a");
 
 
     for (uint e = 0; e < np-1; e++)
@@ -308,7 +308,7 @@ void SpecificWorker::optimize()
     model->update();
     model->addConstr(pose_vars[(np-1)*NP] == rtarget[0], "c1x");
     model->addConstr(pose_vars[(np-1)*NP+1] == rtarget[2], "c1y");
-    model->addConstr(pose_vars[(np-1)*NP+2] == target_ang, "c1a");
+    model->addConstr(pose_vars[(np/2-1)*NP+2] == target_ang, "c1a");
     model->update();
     model->setObjective(obj, GRB_MINIMIZE);
     model->optimize();
