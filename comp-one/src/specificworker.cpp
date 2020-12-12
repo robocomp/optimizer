@@ -104,7 +104,7 @@ void SpecificWorker::compute()
             stop_robot();
         else
         {
-            optimize(StateVector(rtarget.x(), rtarget.z(), target_ang));
+            optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), obstacles);
             float x = control_vars[0].get(GRB_DoubleAttr_X);
             float y = control_vars[1].get(GRB_DoubleAttr_X);
             float a = control_vars[2].get(GRB_DoubleAttr_X);
@@ -242,31 +242,75 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     }
 
     // obstacle constraints
-//    for (uint e = 0; e < NUM_STEPS - 1; e++)
-//        for(auto &obs : obstacles)
-//            for(auto &lines : std::get<Line>(obs))
-//            {
-//                auto &[A, B, C] = lines;
-//                GRBLinExpr inside_line = state_vars[e * STATE_DIM] * A + state_vars[e * STATE_DIM + 1] * B + C;
-//                model->addConstr(inside_line <= 0);
-//            }
+    for (uint e = 0; e < NUM_STEPS - 1; e++)
+        for(auto &obs : obstacles)
+            for(auto &lines : std::get<Line>(obs))
+            {
+                auto &[A, B, C] = lines;
+                GRBLinExpr inside_line = state_vars[e * STATE_DIM] * A + state_vars[e * STATE_DIM + 1] * B + C;
+                std::string name = "obs_" + std::to_string(e);
+                model->addConstr(inside_line <= 0, name);
+                model_contraints_names.push_back(name);
+            }
+
     model->update();
 }
 
-void SpecificWorker::optimize(const StateVector &current_state)
+void SpecificWorker::optimize(const StateVector &current_state, const Obstacles &obstacles)
 {
-    model->remove(model->getConstrByName("c1x"));
-    model->remove(model->getConstrByName("c1y"));
-    model->remove(model->getConstrByName("c1a"));
+    try
+    {
+        model->remove(model->getConstrByName("c1x"));
+        model->remove(model->getConstrByName("c1y"));
+        model->remove(model->getConstrByName("c1a"));
 
-    model->update();
-    model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == current_state.x(), "c1x");
-    model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
-    model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
+        // remove all obstacle restrictions
+        for (auto &s: model_contraints_names)
+            model->remove(model->getConstrByName(s));
+        model_contraints_names.clear();
 
-    model->update();
-    model->setObjective(obj, GRB_MINIMIZE);
-    model->optimize();
+        model->update();
+        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == current_state.x(), "c1x");
+        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
+        model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
+
+        // add new obstacle restrictions
+        for (uint e = 0; e < NUM_STEPS - 1; e++)
+            for (auto &obs : obstacles)
+                for (auto &lines : std::get<Line>(obs))
+                {
+                    auto &[A, B, C] = lines;
+                    GRBLinExpr inside_line = state_vars[e * STATE_DIM] * A + state_vars[e * STATE_DIM + 1] * B + C;
+                    std::string name = "obs_" + std::to_string(e);
+                    model->addConstr(inside_line <= 0, name);
+                    model_contraints_names.push_back(name);
+                }
+
+        model->update();
+        model->setObjective(obj, GRB_MINIMIZE);
+        model->optimize();
+
+        int status = model->get(GRB_IntAttr_Status);
+        if (status == GRB_UNBOUNDED)
+        {
+            std::cout << "The model cannot be solved " << "because it is unbounded" << std::endl;
+        }
+        if (status == GRB_OPTIMAL)
+        {
+            std::cout << "The optimal objective is " <<  model->get(GRB_DoubleAttr_ObjVal) << std::endl;
+        }
+        if ((status != GRB_INF_OR_UNBD) && (status != GRB_INFEASIBLE))
+        {
+            std::cout << "Optimization was stopped with status " << status << std::endl;
+        }
+    }
+    catch (GRBException e)
+    {
+        std::cout << "Error code = " << e.getErrorCode() << std::endl;
+        std::cout << e.getMessage() << std::endl;
+    }
+    catch(...)
+    { std::cout << "Exception during optimization" << std::endl;   }
 
     // cout << "before optimizing" << endl;
     // for(uint e = 0; e < NUM_STEPS; e++)
@@ -345,7 +389,7 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
             float y1 = poly_res.GetPoint(k).y;
             float x2 = poly_res.GetPoint((++k) % num_points).x;
             float y2 = poly_res.GetPoint((k) % num_points).y;
-            return std::make_tuple(y1 - y2, x2 - x1, (x1 - x2) * y1 + (y2 - y1) * x1);
+            return std::make_tuple(y1 - y2, x2 - x1, -((y1 - y2)*x1 + (x2 - x1)*y1));
         });
         obstacles.emplace_back(std::make_tuple(line, poly_draw));
     }

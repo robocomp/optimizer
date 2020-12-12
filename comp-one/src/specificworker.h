@@ -131,7 +131,8 @@ private:
     GRBVar *sin_cos_vars;
     GRBQuadExpr obj = 0;
     void initialize_model(const StateVector &target, const Obstacles &obstacles);
-    void optimize(const StateVector &current_state);
+    void optimize(const StateVector &current_state,  const Obstacles &obstacles);
+    std::vector<std::string> model_contraints_names;
 
     // Draw
     QCustomPlot custom_plot;
