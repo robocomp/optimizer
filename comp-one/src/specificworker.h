@@ -38,9 +38,6 @@
 #include <doublebuffer/DoubleBuffer.h>
 #include "polypartition.h"
 
-#define NP 3 // Number of variables for the pose
-#define NV 3 // Number of variables for the velocity
-
 class MyScene : public QGraphicsScene
 {
     Q_OBJECT
@@ -97,56 +94,55 @@ private:
 	RoboCompGenericBase::TBaseState read_base();
 
 	// robot
-    std::tuple<float,float,float> state_change(const RoboCompGenericBase::TBaseState &bState, float delta_t);
+    const float ROBOT_LENGTH = 400;
+    void stop_robot();
 
     // target
     QPointF target;
-	float target_ang;
-	QVec rtarget;
-	bool newTarget;
     DoubleBuffer<QPointF, QPointF> target_buffer;
-    int cont=0;
 
     // path
-    std::vector<QPointF> path;
-    std::vector<QGraphicsEllipseItem *> path_paint;
-    QString path_color = "#FF00FF";
-    void draw_path();
+    void draw_path(const std::vector<QPointF> &path);
     bool atTarget = true;
 
 	// Grid
 	Grid<> grid;
     MyScene scene;
     QGraphicsItem *robot_polygon = nullptr;
+    void fill_grid(const QPolygonF &ldata);
 
+    // convex parrtitions
+    using Line = std::vector<std::tuple<float, float, float>>;
+    using Obstacles = std::vector<std::tuple<Line, QPolygonF>>;
+    Obstacles compute_laser_partitions(QPolygonF  &laser_poly);
+    void ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
+
+    // Model and optimizations
+    constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
+    constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
+    using ControlVector = Eigen::Matrix<float, CONTROL_DIM, 1>;
+    using StateVector = Eigen::Matrix<float, STATE_DIM, 1>;
+    uint NUM_STEPS = 20;
+    GRBEnv env;
+    GRBModel *model;
+    GRBVar *model_vars;
+    GRBVar *state_vars;
+    GRBVar *control_vars;
+    GRBVar *sin_cos_vars;
+    GRBQuadExpr obj = 0;
+    void initialize_model(const StateVector &target, const Obstacles &obstacles);
+    void optimize(const StateVector &current_state);
 
     // Draw
     QCustomPlot custom_plot;
     QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph;
     void init_drawing( Grid<>::Dimensions dim);
-    float jadv = 0.0; float jrot = 0.0; float jside = 0.0;
     QGraphicsEllipseItem *target_draw = nullptr;
     void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
     void draw_laser(const QPolygonF &poly);
-
-	// Model and optimizations
-	GRBEnv *env;
-	GRBModel *model;
-	GRBVar *model_vars;
-	GRBVar *pose_vars;
-	GRBVar *vel_vars;
-	GRBVar *sin_cos_vars;
-	GRBQuadExpr obj;
-    const float ROBOT_LENGTH = 400;
-	void initialize_model();
-	void optimize();
-    void fill_grid(const QPolygonF &ldata);
-
-    // convex parrtitions
-    using Line = std::vector<std::tuple<float, float, float>>;
-    std::vector<Line> compute_laser_partitions(QPolygonF  &laser_poly);
-    double PerpendicularDistance(const Point &pt, const Point &lineStart, const Point &lineEnd);
-    void RamerDouglasPeucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
+    void draw(const ControlVector &control, float pos_error, float rot_error);
+    void draw_partitions(const Obstacles &obstacles, bool print=false);
+    int cont=0;
 
 };
 
