@@ -128,6 +128,7 @@ private:
     GRBVar *model_vars;
     GRBVar *state_vars;
     GRBVar *control_vars;
+    GRBVar *obstacle_vars;
     GRBVar *sin_cos_vars;
     GRBQuadExpr obj = 0;
     void initialize_model(const StateVector &target, const Obstacles &obstacles);

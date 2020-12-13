@@ -81,7 +81,8 @@ void SpecificWorker::compute()
     auto laser_poly = read_laser();  // returns poly in robot coordinates
     draw_laser(laser_poly);
     auto obstacles = compute_laser_partitions(laser_poly);
-    draw_partitions(obstacles, true);
+    draw_partitions(obstacles, false);
+
     // fill_grid(laser_poly);
 
     // check for new target
@@ -131,7 +132,7 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     state_vars = &(model_vars[0]);
     control_vars = &(model_vars[STATE_DIM * NUM_STEPS]);
     //sin_cos_vars = &(model_vars[4*NUM_STEPS]);
-    
+
     for (uint e = 0; e < NUM_STEPS; e++)
     {
         ostringstream v_name_x, v_name_y, v_name_ang;
@@ -194,8 +195,8 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
         v_name_cx << "cx" << e + 2;
         le = state_vars[e * STATE_DIM] + control_vars[e * CONTROL_DIM];
         re = state_vars[(e + 1) * STATE_DIM];
-        model->addConstr( le == re, v_name_cx.str());
-        
+        model->addConstr(le == re, v_name_cx.str());
+
         v_name_cy << "cy" << e + 2;
         le = state_vars[e * STATE_DIM + 1] + control_vars[e * CONTROL_DIM + 1];
         re = state_vars[(e + 1) * STATE_DIM + 1];
@@ -217,7 +218,7 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     //     le = state_vars[e*2] + control_vars[e*2]*sin_cos_vars[e*2+1];
     //     re = state_vars[(e+1)*2];
     //     model->addQConstr( le == re, vnamecx.str());
-        
+
     //     vnamecy << "cy" << e+2;
     //     le = state_vars[e*2+1] + control_vars[e*2]*sin_cos_vars[e*2];
     //     re = state_vars[(e+1)*2+1];
@@ -241,20 +242,30 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
         //obj += (state_vars[e*2+1]-state_vars[(e+1)*2+1])*(state_vars[e*2+1]-state_vars[(e+1)*2+1]);
     }
 
-    // add new obstacle restrictions
-    for (uint e = 0; e < NUM_STEPS - 1; e++)
-        for (auto &&[k, obs] : iter::enumerate(obstacles))
-        {
-            GRBLinExpr inside_pol;
-            for (auto &lines : std::get<Line>(obs))
-            {
-                auto &[A, B, C] = lines;
-                inside_pol += A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C;
-            }
-            std::string name = "obs_" + std::to_string(k) + "_" + std::to_string(e);
-            model->addConstr(inside_pol <= 0, name);
-            model_contraints_names.push_back(name);
-        }
+    // add new obstacle variables and restrictions  /////  WORK IN PROGRESS
+//    size_t acum = 0;
+//    for (uint e = 0; e < NUM_STEPS; e++)
+//    {
+//        and_vars = model->addVars( NUM_STEPS*obstacles.size(), GRB_BINARY);
+//        for (auto &&[k, obs] : iter::enumerate(obstacles))
+//        {
+//            auto obs_line = std::get<Line>(obs);
+//            for (auto &&[l, lines] : iter::enumerate(obs_line))
+//            {
+//                obstacle_vars[k * l] = model->addVar(0.0, 1.0, 0.0, GRB_BINARY, "");
+//                auto &[A, B, C] = lines;
+//                GRBLinExpr inside = A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C;
+//                model->addConstr(inside > 0, "");
+//            }
+//            acum += obs_line.size();
+//            //std::string name = "obs_" + std::to_string(k) + "_" + std::to_string(e);
+//            and_vars[e] = model->addVar(0.0, 1.0, 0.0, GRB.BINARY, "");
+//            and_constr = model->addGenConstrAnd(res_and, obstacle_vars + acum, obs_line.size(), name);
+//            model_contraints_names.push_back(name);
+//        }
+//        GRBVar res_or = model->addVar(0.0, 1.0, 0.0, GRB.BINARY, "");
+//        auto or_constr = model->addGenConstrOr(res_or, and_vars, obs_line.size(), name);
+//    }
 
     model->update();
 }
@@ -268,30 +279,18 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->remove(model->getConstrByName("c1a"));
 
         // remove all obstacle restrictions
-        for (auto &s: model_contraints_names)
-            model->remove(model->getConstrByName(s));
-        model_contraints_names.clear();
+
+
         model->update();
 
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == current_state.x(), "c1x");
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
         model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
+
         // add new obstacle restrictions
-        for (uint e = 0; e < NUM_STEPS - 1; e++)
-            for (auto &&[k, obs] : iter::enumerate(obstacles))
-            {
-                GRBLinExpr inside_pol;
-                for (auto &lines : std::get<Line>(obs))
-                {
-                    auto &[A, B, C] = lines;
-                    inside_pol += A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C;
-                }
-                std::string name = "obs_" + std::to_string(k) + "_" + std::to_string(e);
-                model->addConstr(inside_pol <= 0, name);
-                model_contraints_names.push_back(name);
-            }
+
         model->update();
-            
+
         model->setObjective(obj, GRB_MINIMIZE);
         model->optimize();
 
@@ -590,11 +589,18 @@ void SpecificWorker::draw_partitions(const Obstacles &obstacles, bool print)
     for (auto p: polys_ptr)
         scene.removeItem(p);
     polys_ptr.clear();
-    QColor color;
+
+    QColor color("LightBlue");
     for(auto &obs : obstacles)
     {
-        color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
-        polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30), QBrush(color)));
+        bool inside = true;
+        for (auto &[A, B, C] : std::get<Line>(obs))
+            inside = inside and C>0;
+        if(inside)
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30), QBrush(color)));
+        else
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30)));
+        // color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
     }
 
     if(print)
