@@ -48,103 +48,118 @@ protected:
     { emit new_target(event); }
 };
 
+using namespace std::literals;
+
 typedef std::pair<double, double> Point;
 class SpecificWorker : public GenericWorker
 {
-Q_OBJECT
-public:
-	SpecificWorker(TuplePrx tprx, bool startup_check);
-	~SpecificWorker();
-	bool setParams(RoboCompCommonBehavior::ParameterList params);
+    Q_OBJECT
+    public:
+        SpecificWorker(TuplePrx tprx, bool startup_check);
+        ~SpecificWorker();
+        bool setParams(RoboCompCommonBehavior::ParameterList params);
 
 
-public slots:
-	void compute();
-	int startup_check();
-	void initialize(int period);
+    public slots:
+        void compute();
+        int startup_check();
+        void initialize(int period);
 
-protected:
-    void resizeEvent(QResizeEvent * event)
-    {
-        custom_plot.resize(signal_frame->size());
-        graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio);
-    }
-    void closeEvent(QCloseEvent *event)
-    {
-        QSettings settings("reaffer Soft", "reafferApp");
-        settings.beginGroup("MainWindow");
-        settings.setValue("size", size());
-        settings.setValue("pos", pos());
-        settings.endGroup();
-        event->accept();
-    }
-    void readSettings()
-    {
-        QSettings settings("reaffer Soft", "reafferApp");
-        settings.beginGroup("MainWindow");
-        resize(settings.value("size", QSize(400, 400)).toSize());
-        move(settings.value("pos", QPoint(200, 200)).toPoint());
-        settings.endGroup();
-    }
+    protected:
+        void resizeEvent(QResizeEvent * event)
+        {
+            custom_plot.resize(signal_frame->size());
+            graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio);
+        }
+        void closeEvent(QCloseEvent *event)
+        {
+            QSettings settings("reaffer Soft", "reafferApp");
+            settings.beginGroup("MainWindow");
+            settings.setValue("size", size());
+            settings.setValue("pos", pos());
+            settings.endGroup();
+            event->accept();
+        }
+        void readSettings()
+        {
+            QSettings settings("reaffer Soft", "reafferApp");
+            settings.beginGroup("MainWindow");
+            resize(settings.value("size", QSize(400, 400)).toSize());
+            move(settings.value("pos", QPoint(200, 200)).toPoint());
+            settings.endGroup();
+        }
 
-private:
-	std::shared_ptr < InnerModel > innerModel;
-	bool startup_check_flag;
-    QPolygonF read_laser();
-	RoboCompGenericBase::TBaseState read_base();
+    private:
+        std::shared_ptr < InnerModel > innerModel;
+        bool startup_check_flag;
+        QPolygonF read_laser();
+        RoboCompGenericBase::TBaseState read_base();
 
-	// robot
-    const float ROBOT_LENGTH = 400;
-    void stop_robot();
+        // robot
+        const float ROBOT_LENGTH = 400;
+        void stop_robot();
 
-    // target
-    QPointF target;
-    DoubleBuffer<QPointF, QPointF> target_buffer;
+        // target
+        QPointF target;
+        DoubleBuffer<QPointF, QPointF> target_buffer;
 
-    // path
-    void draw_path(const std::vector<QPointF> &path);
-    bool atTarget = true;
+        // path
+        void draw_path(const std::vector<QPointF> &path);
+        bool atTarget = true;
 
-	// Grid
-	Grid<> grid;
-    MyScene scene;
-    QGraphicsItem *robot_polygon = nullptr;
-    void fill_grid(const QPolygonF &ldata);
+        // Grid
+        Grid<> grid;
+        MyScene scene;
+        QGraphicsItem *robot_polygon = nullptr;
+        void fill_grid(const QPolygonF &ldata);
 
-    // convex parrtitions
-    using Line = std::vector<std::tuple<float, float, float>>;
-    using Obstacles = std::vector<std::tuple<Line, QPolygonF>>;
-    Obstacles compute_laser_partitions(QPolygonF  &laser_poly);
-    void ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
+        // convex parrtitions
+        using Line = std::vector<std::tuple<float, float, float>>;
+        using Obstacles = std::vector<std::tuple<Line, QPolygonF>>;
+        Obstacles compute_laser_partitions(QPolygonF  &laser_poly);
+        void ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
 
-    // Model and optimizations
-    constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
-    constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
-    using ControlVector = Eigen::Matrix<float, CONTROL_DIM, 1>;
-    using StateVector = Eigen::Matrix<float, STATE_DIM, 1>;
-    uint NUM_STEPS = 20;
-    GRBEnv env;
-    GRBModel *model;
-    GRBVar *model_vars;
-    GRBVar *state_vars;
-    GRBVar *control_vars;
-    GRBVar *obstacle_vars;
-    GRBVar *sin_cos_vars;
-    GRBQuadExpr obj = 0;
-    void initialize_model(const StateVector &target, const Obstacles &obstacles);
-    void optimize(const StateVector &current_state,  const Obstacles &obstacles);
-    std::vector<std::string> model_contraints_names;
+        // Model and optimizations
+        constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
+        constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
+        using ControlVector = Eigen::Matrix<float, CONTROL_DIM, 1>;
+        using StateVector = Eigen::Matrix<float, STATE_DIM, 1>;
+        uint NUM_STEPS = 10;
+        GRBEnv env;
+        GRBModel *model;
+        GRBVar *model_vars;
+        GRBVar *state_vars;
+        GRBVar *control_vars;
 
-    // Draw
-    QCustomPlot custom_plot;
-    QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph;
-    void init_drawing( Grid<>::Dimensions dim);
-    QGraphicsEllipseItem *target_draw = nullptr;
-    void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
-    void draw_laser(const QPolygonF &poly);
-    void draw(const ControlVector &control, float pos_error, float rot_error);
-    void draw_partitions(const Obstacles &obstacles, bool print=false);
-    int cont=0;
+        struct ObsData
+        {
+            struct PolyData
+            {
+                std::vector<std::tuple<GRBVar, std::string>> line_vars;
+                std::vector<std::tuple<GRBGenConstr, std::string>> line_constraint;
+                std::tuple<GRBVar, std::string> and_var;
+                GRBGenConstr and_constraint;
+            };
+            std::vector<PolyData> pdata;
+            std::tuple<GRBVar, std::string> or_var;
+            GRBGenConstr or_constraint;
+        };
+        std::vector<ObsData> obs_contraints;
+        GRBVar *sin_cos_vars;
+        GRBQuadExpr obj = 0;  // pasar dentro
+        void initialize_model(const StateVector &target, const Obstacles &obstacles);
+        void optimize(const StateVector &current_state,  const Obstacles &obstacles);
+
+        // Draw
+        QCustomPlot custom_plot;
+        QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph;
+        void init_drawing( Grid<>::Dimensions dim);
+        QGraphicsEllipseItem *target_draw = nullptr;
+        void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
+        void draw_laser(const QPolygonF &poly);
+        void draw(const ControlVector &control, float pos_error, float rot_error);
+        void draw_partitions(const Obstacles &obstacles, bool print=false);
+        int cont=0;
 
 };
 

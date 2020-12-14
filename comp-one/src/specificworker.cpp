@@ -106,6 +106,12 @@ void SpecificWorker::compute()
         else
         {
             optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), obstacles);
+            int status = model->get(GRB_IntAttr_Status);
+            if(status != GRB_OPTIMAL)
+            {
+                qInfo() << __FUNCTION__ << "Result status:" << status << " Aborting.";
+                std::terminate();
+            }
             float x = control_vars[0].get(GRB_DoubleAttr_X);
             float y = control_vars[1].get(GRB_DoubleAttr_X);
             float a = control_vars[2].get(GRB_DoubleAttr_X);
@@ -243,30 +249,44 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     }
 
     // add new obstacle variables and restrictions  /////  WORK IN PROGRESS
-//    size_t acum = 0;
-//    for (uint e = 0; e < NUM_STEPS; e++)
-//    {
-//        and_vars = model->addVars( NUM_STEPS*obstacles.size(), GRB_BINARY);
-//        for (auto &&[k, obs] : iter::enumerate(obstacles))
-//        {
-//            auto obs_line = std::get<Line>(obs);
-//            for (auto &&[l, lines] : iter::enumerate(obs_line))
-//            {
-//                obstacle_vars[k * l] = model->addVar(0.0, 1.0, 0.0, GRB_BINARY, "");
-//                auto &[A, B, C] = lines;
-//                GRBLinExpr inside = A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C;
-//                model->addConstr(inside > 0, "");
-//            }
-//            acum += obs_line.size();
-//            //std::string name = "obs_" + std::to_string(k) + "_" + std::to_string(e);
-//            and_vars[e] = model->addVar(0.0, 1.0, 0.0, GRB.BINARY, "");
-//            and_constr = model->addGenConstrAnd(res_and, obstacle_vars + acum, obs_line.size(), name);
-//            model_contraints_names.push_back(name);
-//        }
-//        GRBVar res_or = model->addVar(0.0, 1.0, 0.0, GRB.BINARY, "");
-//        auto or_constr = model->addGenConstrOr(res_or, and_vars, obs_line.size(), name);
-//    }
-
+    for (uint e = 0; e < NUM_STEPS; e++)
+    {
+        ObsData obs_data;
+        for (auto &&[k, obs] : iter::enumerate(obstacles))
+        {
+            auto obs_line = std::get<Line>(obs);  // get Line form the tupla
+            ObsData::PolyData pdata;
+            // create line variables for the current polygon and make them equal to robot's distance to line
+            for (auto &&[l, lines] : iter::enumerate(obs_line))
+            {
+                std::string name_v = "obs_line_var_step_" + std::to_string(e) + "_obs_" + std::to_string(k) + "_line_" + std::to_string(l);
+                std::string name_c = "obs_line_constr_step_" + std::to_string(e) + "_obs_" + std::to_string(k) + "_line_" + std::to_string(l);
+                auto line_var = model->addVar(-10000, 10000, 0.0, GRB_BINARY, name_v);
+                auto &[A, B, C] = lines;
+                GRBGenConstr l_constr = model->addGenConstrIndicator(line_var, 1, A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C, GRB_GREATER_EQUAL, 0, name_c);
+                pdata.line_vars.push_back(std::make_tuple(line_var, name_v));
+                pdata.line_constraint.push_back(std::make_tuple(l_constr, name_c));
+            }
+            // The polygon is finished. Create the AND variable for the polygon and AND constraint with all former live variables
+            std::string name = "obs_and_var_step_" + std::to_string(e) + "_obs_" + std::to_string(k);
+            auto and_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY, name);
+            pdata.and_var = std::make_tuple(and_var, name);
+            GRBVar line_vars[pdata.line_vars.size()];   // extract line_vars to pass them to GenContrAnd as a C array
+            for(auto &&[n, ac] : iter::enumerate(pdata.line_vars))
+                line_vars[n] = std::get<GRBVar>(ac);
+            pdata.and_constraint = model->addGenConstrAnd(and_var, line_vars, pdata.line_vars.size());
+            obs_data.pdata.push_back(pdata);
+        }
+        // All polygons are finished. Now we create the OR variable and constraint with all AND variables
+        std::string name = "obs_or_var_step_" + std::to_string(e);
+        GRBVar or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY, name);
+        obs_data.or_var = std::make_tuple(or_var, name);
+        GRBVar and_vars[obs_data.pdata.size()];
+        for(auto &&[n, ac] : iter::enumerate(obs_data.pdata))
+            and_vars[n] = std::get<GRBVar>(ac.and_var);
+        obs_data.or_constraint = model->addGenConstrOr(or_var, and_vars, obs_data.pdata.size());
+        obs_contraints.push_back(obs_data);
+    }
     model->update();
 }
 
@@ -293,25 +313,12 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
 
         model->setObjective(obj, GRB_MINIMIZE);
         model->optimize();
-
-        int status = model->get(GRB_IntAttr_Status);
-        if (status == GRB_UNBOUNDED)
-        {
-            std::cout << "The model cannot be solved " << "because it is unbounded" << std::endl;
-        }
-        if (status == GRB_OPTIMAL)
-        {
-            std::cout << "The optimal objective is " <<  model->get(GRB_DoubleAttr_ObjVal) << std::endl;
-        }
-        if ((status != GRB_INF_OR_UNBD) && (status != GRB_INFEASIBLE))
-        {
-            std::cout << "Optimization was stopped with status " << status << std::endl;
-        }
     }
     catch (GRBException e)
     {
         std::cout << "Error code = " << e.getErrorCode() << std::endl;
         std::cout << e.getMessage() << std::endl;
+        std::terminate();
     }
     catch(...)
     { std::cout << "Exception during optimization" << std::endl;   }
