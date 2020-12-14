@@ -143,6 +143,7 @@ class SpecificWorker : public GenericWorker
             std::vector<PolyData> pdata;
             GRBVar or_var;
             GRBGenConstr or_constraint;
+            GRBConstr final_constraint;
         };
         std::vector<ObsData> obs_contraints;
         GRBVar *sin_cos_vars;
