@@ -135,13 +135,13 @@ class SpecificWorker : public GenericWorker
         {
             struct PolyData
             {
-                std::vector<std::tuple<GRBVar, std::string>> line_vars;
-                std::vector<std::tuple<GRBGenConstr, std::string>> line_constraint;
-                std::tuple<GRBVar, std::string> and_var;
+                std::vector<GRBVar> line_vars;
+                std::vector<GRBGenConstr> line_constraints;
+                GRBVar and_var;
                 GRBGenConstr and_constraint;
             };
             std::vector<PolyData> pdata;
-            std::tuple<GRBVar, std::string> or_var;
+            GRBVar or_var;
             GRBGenConstr or_constraint;
         };
         std::vector<ObsData> obs_contraints;
