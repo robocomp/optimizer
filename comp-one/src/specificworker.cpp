@@ -284,16 +284,20 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == current_state.x(), "c1x");
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
         model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
-
-
+        
         // add new obstacle restrictions
+        obs_contraints.resize(NUM_STEPS);
         for (uint e = 0; e < NUM_STEPS; e++)
         {
             ObsData obs_data;
+            obs_data.pdata.resize(obstacles.size());
+            GRBVar temp_and_vars[obstacles.size()];
             for (auto &&[k, obs] : iter::enumerate(obstacles))
             {
                 auto obs_line = std::get<Line>(obs);  // get Line form the tupla
                 ObsData::PolyData pdata;
+                pdata.line_vars.resize(obs_line.size());
+                pdata.line_constraints.resize(obs_line.size());
                 // create line variables for the current polygon and make them equal to robot's distance to line
                 for (auto &&[l, lines] : iter::enumerate(obs_line))
                 {
@@ -302,25 +306,23 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                     GRBGenConstr l_constr = model->addGenConstrIndicator(line_var, 1,
                                                                          (A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C) / sqrt(A*A+B*B),
                                                                          GRB_GREATER_EQUAL, 100);
-                    pdata.line_vars.push_back(line_var);
-                    pdata.line_constraints.push_back(l_constr);
+                    pdata.line_vars[l] = line_var;
+                    pdata.line_constraints[l] = l_constr;
                 }
                 // The polygon is finished. Create the AND variable for the polygon and AND constraint with all former line variables
                 pdata.and_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
+                temp_and_vars[k] = pdata.and_var;
                 GRBVar line_vars[pdata.line_vars.size()];   // extract line_vars to pass them to GenContrAnd as a C array
                 for(auto &&[n, ac] : iter::enumerate(pdata.line_vars))
                     line_vars[n] = ac;
                 pdata.and_constraint = model->addGenConstrAnd(pdata.and_var, line_vars, pdata.line_vars.size());
-                obs_data.pdata.push_back(pdata);
+                obs_data.pdata[k] = pdata;
             }
             // All polygons are finished. Now we create the OR variable and constraint with all AND variables
             obs_data.or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
-            GRBVar and_vars[obs_data.pdata.size()];
-            for(auto &&[n, ac] : iter::enumerate(obs_data.pdata))
-                and_vars[n] = ac.and_var;
-            obs_data.or_constraint = model->addGenConstrOr(obs_data.or_var, and_vars, obs_data.pdata.size());
+            obs_data.or_constraint = model->addGenConstrOr(obs_data.or_var, temp_and_vars, obs_data.pdata.size());
             obs_data.final_constraint = model->addConstr(obs_data.or_var, GRB_EQUAL,  1.0);  //
-            obs_contraints.push_back(obs_data);
+            obs_contraints[e] = obs_data;
         }
 
         model->update();
@@ -388,7 +390,7 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
     }
     poly_part.SetOrientation(TPPL_CCW);
     //int r = partition.ConvexPartition_HM(&poly, &parts);
-    int r = partition.ConvexPartition_OPT(&poly_part, &parts);
+    partition.ConvexPartition_OPT(&poly_part, &parts);
     //qInfo() << __FUNCTION__ << "Ok: " << r << "Num vertices:" << poly_part.GetNumPoints() << "Num res polys: " << parts.size();
 
     Obstacles obstacles;
