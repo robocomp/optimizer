@@ -110,15 +110,16 @@ void SpecificWorker::compute()
             if(status != GRB_OPTIMAL)
             {
                 qInfo() << __FUNCTION__ << "Result status:" << status << " Aborting.";
-                std::terminate();
             }
-            float x = control_vars[0].get(GRB_DoubleAttr_X);
-            float y = control_vars[1].get(GRB_DoubleAttr_X);
-            float a = control_vars[2].get(GRB_DoubleAttr_X);
-            omnirobot_proxy->setSpeedBase(x, y, a);
-
-            // draw
-            draw(ControlVector(x,y,a), pos_error, rot_error);
+            else
+            {
+                float x = control_vars[0].get(GRB_DoubleAttr_X);
+                float y = control_vars[1].get(GRB_DoubleAttr_X);
+                float a = control_vars[2].get(GRB_DoubleAttr_X);
+                omnirobot_proxy->setSpeedBase(x, y, a);
+                // draw
+                draw(ControlVector(x, y, a), pos_error, rot_error);
+            }
         }
     }
 }
@@ -284,6 +285,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
         model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
 
+
         // add new obstacle restrictions
         for (uint e = 0; e < NUM_STEPS; e++)
         {
@@ -295,15 +297,16 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                 // create line variables for the current polygon and make them equal to robot's distance to line
                 for (auto &&[l, lines] : iter::enumerate(obs_line))
                 {
-                    auto line_var = model->addVar(0.0, 1.0, 1.0, GRB_BINARY);
+                    auto line_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                     auto &[A, B, C] = lines;
-                    GRBGenConstr l_constr = model->addGenConstrIndicator(line_var, 1, A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C,
-                                                                         GRB_GREATER_EQUAL, 0);
+                    GRBGenConstr l_constr = model->addGenConstrIndicator(line_var, 1,
+                                                                         (A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C) / sqrt(A*A+B*B),
+                                                                         GRB_GREATER_EQUAL, 100);
                     pdata.line_vars.push_back(line_var);
                     pdata.line_constraints.push_back(l_constr);
                 }
-                // The polygon is finished. Create the AND variable for the polygon and AND constraint with all former live variables
-                pdata.and_var = model->addVar(0.0, 1.0, 1.0, GRB_BINARY);
+                // The polygon is finished. Create the AND variable for the polygon and AND constraint with all former line variables
+                pdata.and_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                 GRBVar line_vars[pdata.line_vars.size()];   // extract line_vars to pass them to GenContrAnd as a C array
                 for(auto &&[n, ac] : iter::enumerate(pdata.line_vars))
                     line_vars[n] = ac;
@@ -311,7 +314,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                 obs_data.pdata.push_back(pdata);
             }
             // All polygons are finished. Now we create the OR variable and constraint with all AND variables
-            obs_data.or_var = model->addVar(0.0, 1.0, 1.0, GRB_BINARY);
+            obs_data.or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
             GRBVar and_vars[obs_data.pdata.size()];
             for(auto &&[n, ac] : iter::enumerate(obs_data.pdata))
                 and_vars[n] = ac.and_var;
@@ -386,7 +389,7 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
     poly_part.SetOrientation(TPPL_CCW);
     //int r = partition.ConvexPartition_HM(&poly, &parts);
     int r = partition.ConvexPartition_OPT(&poly_part, &parts);
-    qInfo() << __FUNCTION__ << "Ok: " << r << "Num vertices:" << poly_part.GetNumPoints() << "Num res polys: " << parts.size();
+    //qInfo() << __FUNCTION__ << "Ok: " << r << "Num vertices:" << poly_part.GetNumPoints() << "Num res polys: " << parts.size();
 
     Obstacles obstacles;
     for(auto &poly_res : parts)
