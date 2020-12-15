@@ -18,7 +18,7 @@
  */
 #include "specificworker.h"
 #include <cppitertools/enumerate.hpp>
-#include <ranges>
+//#include <ranges>
 
 /**
 * \brief Default constructor
@@ -109,6 +109,7 @@ void SpecificWorker::compute()
             int status = model->get(GRB_IntAttr_Status);
             if(status != GRB_OPTIMAL)
             {
+                omnirobot_proxy->setSpeedBase(0, 0, 0);
                 qInfo() << __FUNCTION__ << "Result status:" << status << " Aborting.";
             }
             else
@@ -122,6 +123,7 @@ void SpecificWorker::compute()
             }
         }
     }
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -169,8 +171,8 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
 
         v_name_v << "v" << e;
         control_vars[e * CONTROL_DIM + 1].set(GRB_StringAttr_VarName, v_name_v.str());
-        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_LB, -10000);
-        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_UB, +10000);
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_LB, -2000);
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_UB, +2000);
 
         v_name_w << "w" << e;
         control_vars[e * CONTROL_DIM + 2].set(GRB_StringAttr_VarName, v_name_w.str());
@@ -286,43 +288,55 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
         
         // add new obstacle restrictions
-        obs_contraints.resize(NUM_STEPS);
-        for (uint e = 0; e < NUM_STEPS; e++)
+        obs_contraints.resize(NUM_STEPS*4);
+        std::vector<QPointF> desp(4);
+        float D = 300.;
+        desp[0] = QPointF(-D, -D);
+        desp[1] = QPointF(-D, D);
+        desp[2] = QPointF(D, -D);
+        desp[3] = QPointF(D, D);
+        for(uint i = 0; i< 4; i++)
         {
-            ObsData obs_data;
-            obs_data.pdata.resize(obstacles.size());
-            GRBVar temp_and_vars[obstacles.size()];
-            for (auto &&[k, obs] : iter::enumerate(obstacles))
+            float dx, dy;
+            dx = desp[i].x();
+            dy = desp[i].y();
+            for (uint e = 0; e < NUM_STEPS; e++)
             {
-                auto obs_line = std::get<Line>(obs);  // get Line form the tupla
-                ObsData::PolyData pdata;
-                pdata.line_vars.resize(obs_line.size());
-                pdata.line_constraints.resize(obs_line.size());
-                // create line variables for the current polygon and make them equal to robot's distance to line
-                for (auto &&[l, lines] : iter::enumerate(obs_line))
+                ObsData obs_data;
+                obs_data.pdata.resize(obstacles.size());
+                GRBVar temp_and_vars[obstacles.size()];
+                for (auto &&[k, obs] : iter::enumerate(obstacles))
                 {
-                    auto line_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
-                    auto &[A, B, C] = lines;
-                    GRBGenConstr l_constr = model->addGenConstrIndicator(line_var, 1,
-                                                                         (A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + C) / sqrt(A*A+B*B),
-                                                                         GRB_GREATER_EQUAL, 100);
-                    pdata.line_vars[l] = line_var;
-                    pdata.line_constraints[l] = l_constr;
+                    auto obs_line = std::get<Line>(obs);  // get Line form the tupla
+                    ObsData::PolyData pdata;
+                    pdata.line_vars.resize(obs_line.size());
+                    pdata.line_constraints.resize(obs_line.size());
+                    // create line variables for the current polygon and make them equal to robot's distance to line
+                    for (auto &&[l, lines] : iter::enumerate(obs_line))
+                    {
+                        auto line_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
+                        auto &[A, B, C] = lines;
+                        GRBGenConstr l_constr = model->addGenConstrIndicator(line_var, 1,
+                                                                            (A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + A*dx + B*dy + C),
+                                                                            GRB_GREATER_EQUAL, 0);
+                        pdata.line_vars[l] = line_var;
+                        pdata.line_constraints[l] = l_constr;
+                    }
+                    // The polygon is finished. Create the AND variable for the polygon and AND constraint with all former line variables
+                    pdata.and_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
+                    temp_and_vars[k] = pdata.and_var;
+                    GRBVar line_vars[pdata.line_vars.size()];   // extract line_vars to pass them to GenContrAnd as a C array
+                    for(auto &&[n, ac] : iter::enumerate(pdata.line_vars))
+                        line_vars[n] = ac;
+                    pdata.and_constraint = model->addGenConstrAnd(pdata.and_var, line_vars, pdata.line_vars.size());
+                    obs_data.pdata[k] = pdata;
                 }
-                // The polygon is finished. Create the AND variable for the polygon and AND constraint with all former line variables
-                pdata.and_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
-                temp_and_vars[k] = pdata.and_var;
-                GRBVar line_vars[pdata.line_vars.size()];   // extract line_vars to pass them to GenContrAnd as a C array
-                for(auto &&[n, ac] : iter::enumerate(pdata.line_vars))
-                    line_vars[n] = ac;
-                pdata.and_constraint = model->addGenConstrAnd(pdata.and_var, line_vars, pdata.line_vars.size());
-                obs_data.pdata[k] = pdata;
+                // All polygons are finished. Now we create the OR variable and constraint with all AND variables
+                obs_data.or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
+                obs_data.or_constraint = model->addGenConstrOr(obs_data.or_var, temp_and_vars, obs_data.pdata.size());
+                obs_data.final_constraint = model->addConstr(obs_data.or_var, GRB_EQUAL,  1.0);  //
+                obs_contraints[e*4+i] = obs_data;
             }
-            // All polygons are finished. Now we create the OR variable and constraint with all AND variables
-            obs_data.or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
-            obs_data.or_constraint = model->addGenConstrOr(obs_data.or_var, temp_and_vars, obs_data.pdata.size());
-            obs_data.final_constraint = model->addConstr(obs_data.or_var, GRB_EQUAL,  1.0);  //
-            obs_contraints[e] = obs_data;
         }
 
         model->update();
@@ -389,8 +403,8 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
         poly_part[i].y = l.y();
     }
     poly_part.SetOrientation(TPPL_CCW);
-    //int r = partition.ConvexPartition_HM(&poly, &parts);
-    partition.ConvexPartition_OPT(&poly_part, &parts);
+    int r = partition.ConvexPartition_HM(&poly_part, &parts);
+    //partition.ConvexPartition_OPT(&poly_part, &parts);
     //qInfo() << __FUNCTION__ << "Ok: " << r << "Num vertices:" << poly_part.GetNumPoints() << "Num res polys: " << parts.size();
 
     Obstacles obstacles;
@@ -415,7 +429,8 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
             float y1 = poly_res.GetPoint(k).y;
             float x2 = poly_res.GetPoint((++k) % num_points).x;
             float y2 = poly_res.GetPoint((k) % num_points).y;
-            return std::make_tuple(y1 - y2, x2 - x1, -((y1 - y2)*x1 + (x2 - x1)*y1));
+            float norm = sqrt(pow(y1-y2, 2) + pow(x2-x1, 2));
+            return std::make_tuple((y1 - y2)/norm, (x2 - x1)/norm, -((y1 - y2)*x1 + (x2 - x1)*y1)/norm);
         });
         obstacles.emplace_back(std::make_tuple(line, poly_draw));
     }
