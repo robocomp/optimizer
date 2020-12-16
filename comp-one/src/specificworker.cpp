@@ -117,6 +117,12 @@ void SpecificWorker::compute()
                 float x = control_vars[0].get(GRB_DoubleAttr_X);
                 float y = control_vars[1].get(GRB_DoubleAttr_X);
                 float a = control_vars[2].get(GRB_DoubleAttr_X);
+                qDebug()<<"CONTROL"<<x<<y<<a;
+                if(fabs(a)>0.1)
+                {
+                    x = 0;
+                    y = 0;
+                }
                 omnirobot_proxy->setSpeedBase(x, y, a);
                 // draw
                 draw(ControlVector(x, y, a), pos_error, rot_error);
@@ -133,8 +139,9 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     // Create environment
     //env = new GRBEnv("path_optimization.log");
     //env.set("LogFile", "path_optimization.log");
-
+    
     // Create initial model
+    env.set(GRB_IntParam_OutputFlag, 0);
     model = new GRBModel(env);
     model->set(GRB_StringAttr_ModelName, "path_optimization");
     model_vars = model->addVars((STATE_DIM + CONTROL_DIM) * NUM_STEPS, GRB_CONTINUOUS);
@@ -288,9 +295,9 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
         
         // add new obstacle restrictions
-        obs_contraints.resize(NUM_STEPS*4);
+        obs_contraints.resize((NUM_STEPS-1)*4);
         std::vector<QPointF> desp(4);
-        float D = 300.;
+        float D = 350.;
         desp[0] = QPointF(-D, -D);
         desp[1] = QPointF(-D, D);
         desp[2] = QPointF(D, -D);
@@ -300,7 +307,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
             float dx, dy;
             dx = desp[i].x();
             dy = desp[i].y();
-            for (uint e = 0; e < NUM_STEPS; e++)
+            for (uint e = 1; e < NUM_STEPS; e++)
             {
                 ObsData obs_data;
                 obs_data.pdata.resize(obstacles.size());
@@ -335,7 +342,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                 obs_data.or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                 obs_data.or_constraint = model->addGenConstrOr(obs_data.or_var, temp_and_vars, obs_data.pdata.size());
                 obs_data.final_constraint = model->addConstr(obs_data.or_var, GRB_EQUAL,  1.0);  //
-                obs_contraints[e*4+i] = obs_data;
+                obs_contraints[(e-1)*4+i] = obs_data;
             }
         }
 
