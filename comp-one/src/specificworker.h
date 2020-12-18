@@ -124,7 +124,7 @@ class SpecificWorker : public GenericWorker
         constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
         using ControlVector = Eigen::Matrix<float, CONTROL_DIM, 1>;
         using StateVector = Eigen::Matrix<float, STATE_DIM, 1>;
-        uint NUM_STEPS = 10;
+        uint NUM_STEPS = 5;
         GRBEnv env;
         GRBModel *model;
         GRBVar *model_vars;
@@ -144,6 +144,24 @@ class SpecificWorker : public GenericWorker
             GRBVar or_var;
             GRBGenConstr or_constraint;
             GRBConstr final_constraint;
+            void clear(GRBModel *model)
+            {
+                model->remove(or_var);
+                model->remove(or_constraint);
+                model->remove(final_constraint);
+                for(auto &p : pdata)
+                {
+                    model->remove(p.and_var);
+                    model->remove(p.and_constraint);
+                    for(auto &lv : p.line_vars)
+                        model->remove(lv);
+                    p.line_vars.clear();
+                    for(auto &lc : p.line_constraints)
+                        model->remove(lc);
+                    p.line_constraints.clear();
+                }
+                pdata.clear();
+            }
         };
         std::vector<ObsData> obs_contraints;
         GRBVar *sin_cos_vars;
@@ -153,12 +171,12 @@ class SpecificWorker : public GenericWorker
 
         // Draw
         QCustomPlot custom_plot;
-        QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph;
+        QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph, *timeGraph;
         void init_drawing( Grid<>::Dimensions dim);
         QGraphicsEllipseItem *target_draw = nullptr;
         void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
         void draw_laser(const QPolygonF &poly);
-        void draw(const ControlVector &control, float pos_error, float rot_error);
+        void draw(const ControlVector &control, float pos_error, float rot_error, float time_elapsed);
         void draw_partitions(const Obstacles &obstacles, bool print=false);
         int cont=0;
 

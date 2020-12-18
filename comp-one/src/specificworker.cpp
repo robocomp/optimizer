@@ -105,7 +105,12 @@ void SpecificWorker::compute()
             stop_robot();
         else
         {
+            auto t = std::chrono::high_resolution_clock::now();
             optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), obstacles);
+            auto now = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( now - t ).count();
+            //std::cout << "optimize " << duration3 << " ms" << std::endl;
+
             int status = model->get(GRB_IntAttr_Status);
             if(status != GRB_OPTIMAL)
             {
@@ -125,7 +130,7 @@ void SpecificWorker::compute()
                 }
                 omnirobot_proxy->setSpeedBase(x, y, a);
                 // draw
-                draw(ControlVector(x, y, a), pos_error, rot_error);
+                draw(ControlVector(x, y, a), pos_error, rot_error, duration);
             }
         }
     }
@@ -270,23 +275,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
 
         // remove all obstacle restrictions
         for (auto &constr : obs_contraints)
-        {
-            model->remove(constr.or_var);
-            model->remove(constr.or_constraint);
-            model->remove(constr.final_constraint);
-            for(auto &p : constr.pdata)
-            {
-                model->remove(p.and_var);
-                model->remove(p.and_constraint);
-                for(auto &lv : p.line_vars)
-                    model->remove(lv);
-                p.line_vars.clear();
-                for(auto &lc : p.line_constraints)
-                    model->remove(lc);
-                p.line_constraints.clear();
-            }
-            constr.pdata.clear();
-        }
+            constr.clear(model);
         obs_contraints.clear();
 
         model->update();
@@ -295,18 +284,12 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
         
         // add new obstacle restrictions
-        obs_contraints.resize((NUM_STEPS-1)*4);
-        std::vector<QPointF> desp(4);
-        float D = 350.;
-        desp[0] = QPointF(-D, -D);
-        desp[1] = QPointF(-D, D);
-        desp[2] = QPointF(D, -D);
-        desp[3] = QPointF(D, D);
-        for(uint i = 0; i< 4; i++)
+        float DW = 350.f, DL = 250.f;
+        std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
+        obs_contraints.resize((NUM_STEPS-1) * desp.size());
+        for(auto &&[i, d] : iter::enumerate(desp))
         {
-            float dx, dy;
-            dx = desp[i].x();
-            dy = desp[i].y();
+            auto &[dx, dy] = d;
             for (uint e = 1; e < NUM_STEPS; e++)
             {
                 ObsData obs_data;
@@ -318,37 +301,37 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                     ObsData::PolyData pdata;
                     pdata.line_vars.resize(obs_line.size());
                     pdata.line_constraints.resize(obs_line.size());
+                    GRBVar temp_line_vars[obs_line.size()];  // to feed the and constraint and avoid a copy
                     // create line variables for the current polygon and make them equal to robot's distance to line
                     for (auto &&[l, lines] : iter::enumerate(obs_line))
                     {
                         auto line_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                         auto &[A, B, C] = lines;
                         GRBGenConstr l_constr = model->addGenConstrIndicator(line_var, 1,
-                                                                            (A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] + A*dx + B*dy + C),
-                                                                            GRB_GREATER_EQUAL, 0);
+                                                                                 (A * state_vars[e * STATE_DIM] + B * state_vars[e * STATE_DIM + 1] +
+                                                                                  A * dx + B * dy + C),
+                                                                                 GRB_GREATER_EQUAL, 0);
                         pdata.line_vars[l] = line_var;
                         pdata.line_constraints[l] = l_constr;
+                        temp_line_vars[l] = line_var;
                     }
                     // The polygon is finished. Create the AND variable for the polygon and AND constraint with all former line variables
                     pdata.and_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                     temp_and_vars[k] = pdata.and_var;
-                    GRBVar line_vars[pdata.line_vars.size()];   // extract line_vars to pass them to GenContrAnd as a C array
-                    for(auto &&[n, ac] : iter::enumerate(pdata.line_vars))
-                        line_vars[n] = ac;
-                    pdata.and_constraint = model->addGenConstrAnd(pdata.and_var, line_vars, pdata.line_vars.size());
+                    pdata.and_constraint = model->addGenConstrAnd(pdata.and_var, temp_line_vars, pdata.line_vars.size());
                     obs_data.pdata[k] = pdata;
                 }
                 // All polygons are finished. Now we create the OR variable and constraint with all AND variables
                 obs_data.or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                 obs_data.or_constraint = model->addGenConstrOr(obs_data.or_var, temp_and_vars, obs_data.pdata.size());
                 obs_data.final_constraint = model->addConstr(obs_data.or_var, GRB_EQUAL,  1.0);  //
-                obs_contraints[(e-1)*4+i] = obs_data;
+                obs_contraints[(e-1)*desp.size()+i] = obs_data;
             }
         }
-
         model->update();
         model->setObjective(obj, GRB_MINIMIZE);
         model->optimize();
+
     }
     catch (GRBException e)
     {
@@ -412,10 +395,11 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
     poly_part.SetOrientation(TPPL_CCW);
     int r = partition.ConvexPartition_HM(&poly_part, &parts);
     //partition.ConvexPartition_OPT(&poly_part, &parts);
+    //int r = partition.Triangulate_OPT(&poly_part, &parts);
     //qInfo() << __FUNCTION__ << "Ok: " << r << "Num vertices:" << poly_part.GetNumPoints() << "Num res polys: " << parts.size();
 
-    Obstacles obstacles;
-    for(auto &poly_res : parts)
+    Obstacles obstacles(parts.size());
+    for(auto &&[k, poly_res] : iter::enumerate(parts))
     {
         //color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
         auto num_points = poly_res.GetNumPoints();
@@ -439,7 +423,7 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
             float norm = sqrt(pow(y1-y2, 2) + pow(x2-x1, 2));
             return std::make_tuple((y1 - y2)/norm, (x2 - x1)/norm, -((y1 - y2)*x1 + (x2 - x1)*y1)/norm);
         });
-        obstacles.emplace_back(std::make_tuple(line, poly_draw));
+        obstacles[k] = std::make_tuple(line, poly_draw);
     }
     return obstacles;
 }
@@ -476,6 +460,8 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
     exGraph->setPen(QColor("magenta"));
     ewGraph = custom_plot.addGraph();
     ewGraph->setPen(QColor("black"));
+    timeGraph = custom_plot.addGraph();
+    timeGraph->setPen(QColor("orange"));
     custom_plot.resize(signal_frame->size());
     custom_plot.show();
 
@@ -533,7 +519,7 @@ QPolygonF SpecificWorker::read_laser()
         std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable
                     { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
         vector<Point> pointListOut;
-        ramer_douglas_peucker(plist, 50, pointListOut);
+        ramer_douglas_peucker(plist, 100, pointListOut);
         laser_poly.resize(pointListOut.size());
 //        std::generate(laser_poly.begin(), laser_poly.end(), [pointListOut, this, k=0]() mutable
 //                    { auto &p = pointListOut[k++]; return robot_polygon->mapToScene(QPointF(p.first, p.second));});
@@ -599,6 +585,7 @@ void SpecificWorker::draw_target(const RoboCompGenericBase::TBaseState &bState, 
     yGraph->data()->clear();
     exGraph->data()->clear();
     ewGraph->data()->clear();
+    timeGraph->data()->clear();
 }
 
 void SpecificWorker::stop_robot()
@@ -608,7 +595,7 @@ void SpecificWorker::stop_robot()
     atTarget = true;
 }
 
-void SpecificWorker::draw(const ControlVector &control, float pos_error, float rot_error)
+void SpecificWorker::draw(const ControlVector &control, float pos_error, float rot_error, float time_elapsed)
 {
     std::vector<QPointF> path(NUM_STEPS);
     std::generate(path.begin(), path.end(), [i=innerModel, s=state_vars, d=STATE_DIM, e=0]() mutable
@@ -623,6 +610,7 @@ void SpecificWorker::draw(const ControlVector &control, float pos_error, float r
     wGraph->addData(cont, control[2]*300);
     exGraph->addData(cont, pos_error);
     ewGraph->addData(cont,rot_error*300);
+    timeGraph->addData(cont,time_elapsed*10);
     cont++;
     custom_plot.replot();
 }
@@ -635,18 +623,20 @@ void SpecificWorker::draw_partitions(const Obstacles &obstacles, bool print)
     polys_ptr.clear();
 
     QColor color("LightBlue");
+    QColor color_edge;
     for(auto &obs : obstacles)
     {
         bool inside = true;
         for (auto &[A, B, C] : std::get<Line>(obs))
-            inside = inside and C>0;
-        if(inside)
+            inside = inside and C > 0;
+        if (inside)
             polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30), QBrush(color)));
         else
-            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30)));
-        // color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
+        {
+            color_edge.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color_edge, 30)));
+        }
     }
-
     if(print)
     {
         qInfo() << "--------- LINES ------------";
