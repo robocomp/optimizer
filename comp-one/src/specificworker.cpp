@@ -19,6 +19,9 @@
 #include "specificworker.h"
 #include <cppitertools/enumerate.hpp>
 //#include <ranges>
+#include <cppitertools/chunked.hpp>
+#include <cppitertools/sliding_window.hpp>
+
 
 /**
 * \brief Default constructor
@@ -123,11 +126,11 @@ void SpecificWorker::compute()
                 float y = control_vars[1].get(GRB_DoubleAttr_X);
                 float a = control_vars[2].get(GRB_DoubleAttr_X);
                 qDebug()<<"CONTROL"<<x<<y<<a;
-                if(fabs(a)>0.1)
-                {
-                    x = 0;
-                    y = 0;
-                }
+//                if(fabs(a)>0.9)
+//                {
+//                    x = 0;
+//                    y = 0;
+//                }
                 omnirobot_proxy->setSpeedBase(x, y, a);
                 // draw
                 draw(ControlVector(x, y, a), pos_error, rot_error, duration);
@@ -251,17 +254,15 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     //     // model->addGenConstrCos(control_vars[e*2+1], sin_cos_vars[e*2+1], vnameccos.str());
     // }
 
-    // Quadratic constraints as the sum of the squared modules of all controls
-    //obj = 0;  in .h
+    // Quadratic expression to be minimized as the sum of the squared modules of all controls
+    //for(auto &&e : iter::chunked(iter::slice(control_vars, 0, NUM_STEPS-1), 3))
     for (uint e = 0; e < NUM_STEPS - 1; e++)
     {
-        obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM];
-        obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1];
+        obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.002;     // compensation factors as de R matrix
+        obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.002;
         obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];
-
-        //obj += (state_vars[e*2]-state_vars[(e+1)*2])*(state_vars[e*2]-state_vars[(e+1)*2]);
-        //obj += (state_vars[e*2+1]-state_vars[(e+1)*2+1])*(state_vars[e*2+1]-state_vars[(e+1)*2+1]);
     }
+
     model->update();
 }
 
@@ -284,7 +285,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
         
         // add new obstacle restrictions
-        float DW = 350.f, DL = 250.f;
+        float DW = 350.f, DL = 350.f;
         std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
         obs_contraints.resize((NUM_STEPS-1) * desp.size());
         for(auto &&[i, d] : iter::enumerate(desp))
@@ -303,7 +304,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                     pdata.line_constraints.resize(obs_line.size());
                     GRBVar temp_line_vars[obs_line.size()];  // to feed the and constraint and avoid a copy
                     // create line variables for the current polygon and make them equal to robot's distance to line
-                    for (auto &&[l, lines] : iter::enumerate(obs_line))
+                    for (auto &&[l, lines] : obs_line | iter::enumerate)
                     {
                         auto line_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                         auto &[A, B, C] = lines;
@@ -507,7 +508,7 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     return bState;
 }
 
-QPolygonF SpecificWorker::read_laser()
+QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
 {
     QPolygonF laser_poly;
     try
@@ -521,10 +522,19 @@ QPolygonF SpecificWorker::read_laser()
         vector<Point> pointListOut;
         ramer_douglas_peucker(plist, 100, pointListOut);
         laser_poly.resize(pointListOut.size());
-//        std::generate(laser_poly.begin(), laser_poly.end(), [pointListOut, this, k=0]() mutable
-//                    { auto &p = pointListOut[k++]; return robot_polygon->mapToScene(QPointF(p.first, p.second));});
         std::generate(laser_poly.begin(), laser_poly.end(), [pointListOut, this, k=0]() mutable
                       { auto &p = pointListOut[k++]; return QPointF(p.first, p.second);});
+
+        // Filter out spikes
+        // If the angle (in degrees) between two line segments is less than or equal to the specified maximum angle,
+        // then the middle point is a spike and is removed.
+        const float MAX_ANGLE = 0.2; // degrees
+        std::vector<QPointF> removed;
+        for(auto &&[k, ps] : iter::sliding_window(laser_poly,3) | iter::enumerate)
+            if( MAX_ANGLE > acos(QVector2D::dotProduct( QVector2D(ps[0] - ps[1]).normalized(), QVector2D(ps[2] - ps[1]).normalized())))
+                removed.push_back(ps[1]);
+        for(auto &&r : removed)
+            laser_poly.erase(std::remove_if(laser_poly.begin(), laser_poly.end(), [r](auto &p) { return p == r; }), laser_poly.end());
     }
     catch(const Ice::Exception &e)
     { std::cout << "Error reading from Laser" << e << std::endl;}

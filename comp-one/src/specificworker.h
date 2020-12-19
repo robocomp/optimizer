@@ -124,13 +124,14 @@ class SpecificWorker : public GenericWorker
         constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
         using ControlVector = Eigen::Matrix<float, CONTROL_DIM, 1>;
         using StateVector = Eigen::Matrix<float, STATE_DIM, 1>;
-        uint NUM_STEPS = 5;
+        uint NUM_STEPS = 6;
+        std::vector<uint> STEPS{1,2,3,4,5};
         GRBEnv env;
         GRBModel *model;
         GRBVar *model_vars;
         GRBVar *state_vars;
         GRBVar *control_vars;
-
+        GRBQuadExpr obj;
         struct ObsData
         {
             struct PolyData
@@ -165,7 +166,6 @@ class SpecificWorker : public GenericWorker
         };
         std::vector<ObsData> obs_contraints;
         GRBVar *sin_cos_vars;
-        GRBQuadExpr obj = 0;  // pasar dentro
         void initialize_model(const StateVector &target, const Obstacles &obstacles);
         void optimize(const StateVector &current_state,  const Obstacles &obstacles);
 
