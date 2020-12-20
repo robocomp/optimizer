@@ -126,11 +126,11 @@ void SpecificWorker::compute()
                 float y = control_vars[1].get(GRB_DoubleAttr_X);
                 float a = control_vars[2].get(GRB_DoubleAttr_X);
                 qDebug()<<"CONTROL"<<x<<y<<a;
-//                if(fabs(a)>0.9)
-//                {
-//                    x = 0;
-//                    y = 0;
-//                }
+                if(fabs(a)>0.1)
+                {
+                    x = 0;
+                    y = 0;
+                }
                 omnirobot_proxy->setSpeedBase(x, y, a);
                 // draw
                 draw(ControlVector(x, y, a), pos_error, rot_error, duration);
@@ -255,16 +255,16 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->update();
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == current_state.x(), "c1x");
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
-        model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
+        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 2] == current_state[2], "c1a");
         
         // add new obstacle restrictions
-        float DW = 350.f, DL = 350.f;
+        float DW = 400.f, DL = 400.f;
         std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
-        obs_contraints.resize((NUM_STEPS-1) * desp.size());
+        obs_contraints.resize((NUM_STEPS-2) * desp.size());
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
         {
             auto &[dx, dy] = d;
-            for (uint e = 1; e < NUM_STEPS; e++)   // avoids restriction over state[0]
+            for (uint e = 1; e < NUM_STEPS-1; e++)   // avoids restriction over state[0]
             {
                 ObsData obs_data;
                 obs_data.pdata.resize(obstacles.size());
