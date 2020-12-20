@@ -90,6 +90,14 @@ class SpecificWorker : public GenericWorker
         }
 
     private:
+        // constants
+        const float MAX_SPIKING_ANGLE_rads = 0.2;
+        const float MAX_RDP_DEVIATION_mm  =  70;
+        const uint NUM_STEPS = 6;
+        constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
+        constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
+
+        // general
         std::shared_ptr < InnerModel > innerModel;
         bool startup_check_flag;
         QPolygonF read_laser();
@@ -120,12 +128,8 @@ class SpecificWorker : public GenericWorker
         void ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
 
         // Model and optimizations
-        constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
-        constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
         using ControlVector = Eigen::Matrix<float, CONTROL_DIM, 1>;
         using StateVector = Eigen::Matrix<float, STATE_DIM, 1>;
-        uint NUM_STEPS = 6;
-        std::vector<uint> STEPS{1,2,3,4,5};
         GRBEnv env;
         GRBModel *model;
         GRBVar *model_vars;

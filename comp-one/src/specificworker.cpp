@@ -140,7 +140,7 @@ void SpecificWorker::compute()
 
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////// OPTIMIZER /////////////////////////////////////////////////////////
 
 void SpecificWorker::initialize_model(const StateVector &target, const Obstacles &obstacles)
 {
@@ -178,7 +178,7 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     }
     for (uint e = 0; e < NUM_STEPS; e++)
     {
-        ostringstream v_name_u, v_name_v, v_name_w, vnamesin, vnamecos;
+        ostringstream v_name_u, v_name_v, v_name_w;
         v_name_u << "u" << e;
         control_vars[e * CONTROL_DIM].set(GRB_StringAttr_VarName, v_name_u.str());
         control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_LB, -10000);
@@ -193,18 +193,13 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
         control_vars[e * CONTROL_DIM + 2].set(GRB_StringAttr_VarName, v_name_w.str());
         control_vars[e * CONTROL_DIM + 2].set(GRB_DoubleAttr_LB, -M_PI);
         control_vars[e * CONTROL_DIM + 2].set(GRB_DoubleAttr_UB, M_PI);
-
-        // vnamesin << "sin_v" << e;
-        // sin_cos_vars[e*2].set(GRB_StringAttr_VarName, vnamesin.str());
-        // vnamecos << "cos_v" << e;
-        // sin_cos_vars[e*2+1].set(GRB_StringAttr_VarName, vnamecos.str());
-
     }
 
     // initial state value
     model->addConstr(state_vars[0] == 0, "c0x");
     model->addConstr(state_vars[1] == 0, "c0y");
     model->addConstr(state_vars[2] == 0, "c0a");
+
     // final state should be equal to target
     model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target.x(), "c1x");
     model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target.y(), "c1y");
@@ -233,27 +228,6 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
 
     }
 
-    // for (uint e = 0; e < NUM_STEPS-1; e++)
-    // {
-    //     ostringstream vnamecx, vnamecy, vnamecsin, vnameccos;
-    //     GRBQuadExpr le, re;
-
-    //     vnamecx << "cx" << e+2;
-    //     le = state_vars[e*2] + control_vars[e*2]*sin_cos_vars[e*2+1];
-    //     re = state_vars[(e+1)*2];
-    //     model->addQConstr( le == re, vnamecx.str());
-
-    //     vnamecy << "cy" << e+2;
-    //     le = state_vars[e*2+1] + control_vars[e*2]*sin_cos_vars[e*2];
-    //     re = state_vars[(e+1)*2+1];
-    //     model->addQConstr(le == re, vnamecy.str());
-
-    //     // vnamecsin << "csin" << e+2;
-    //     // model->addGenConstrSin(control_vars[e*2+1], sin_cos_vars[e*2], vnamecsin.str());
-    //     // vnameccos << "ccos" << e+2;
-    //     // model->addGenConstrCos(control_vars[e*2+1], sin_cos_vars[e*2+1], vnameccos.str());
-    // }
-
     // Quadratic expression to be minimized as the sum of the squared modules of all controls
     //for(auto &&e : iter::chunked(iter::slice(control_vars, 0, NUM_STEPS-1), 3))
     for (uint e = 0; e < NUM_STEPS - 1; e++)
@@ -262,7 +236,6 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
         obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.002;
         obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];
     }
-
     model->update();
 }
 
@@ -288,10 +261,10 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         float DW = 350.f, DL = 350.f;
         std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
         obs_contraints.resize((NUM_STEPS-1) * desp.size());
-        for(auto &&[i, d] : iter::enumerate(desp))
+        for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
         {
             auto &[dx, dy] = d;
-            for (uint e = 1; e < NUM_STEPS; e++)
+            for (uint e = 1; e < NUM_STEPS; e++)   // avoids restriction over state[0]
             {
                 ObsData obs_data;
                 obs_data.pdata.resize(obstacles.size());
@@ -328,7 +301,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                 obs_data.final_constraint = model->addConstr(obs_data.or_var, GRB_EQUAL,  1.0);  //
                 obs_contraints[(e-1)*desp.size()+i] = obs_data;
             }
-        }
+        }  // All points of the robot are finished
         model->update();
         model->setObjective(obj, GRB_MINIMIZE);
         model->optimize();
@@ -342,44 +315,9 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
     }
     catch(...)
     { std::cout << "Exception during optimization" << std::endl;   }
-
-    // cout << "before optimizing" << endl;
-    // for(uint e = 0; e < NUM_STEPS; e++)
-    // {
-    //     float x = state_vars[e*2].get(GRB_DoubleAttr_Start);
-    //     cout << state_vars[e*2].get(GRB_StringAttr_VarName) << " " << x << endl;
-    //     float y = state_vars[e*2+1].get(GRB_DoubleAttr_Start);
-    //     cout << state_vars[e*2+1].get(GRB_StringAttr_VarName) << " " << y << endl;
-    
-    // }
-
-    // cout << "after optimizing" << endl;
-//    path.clear();
-//    for(uint e = 0; e < NUM_STEPS; e++)
-//    {
-//        float x = state_vars[e * STATE_DIM].get(GRB_DoubleAttr_X);
-//        // cout << state_vars[e*2].get(GRB_StringAttr_VarName) << " "
-//        // << x << endl;
-//        float y = state_vars[e * STATE_DIM + 1].get(GRB_DoubleAttr_X);
-//        // cout << state_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
-//        // << y << endl;
-//        QVec p =  innerModel->transform("world", QVec::vec3(x, 0., y), "base");
-//        path.emplace_back(QPointF(p[0], p[2]));
-//    }
-    // for(uint e = 0; e < NUM_STEPS; e++)
-    // {
-    //     float x = control_vars[e*2].get(GRB_DoubleAttr_X);
-    //     cout << control_vars[e*2].get(GRB_StringAttr_VarName) << " "
-    //      << x << endl;
-    //     float y = control_vars[e*2+1].get(GRB_DoubleAttr_X);
-    //     cout << control_vars[e*2+1].get(GRB_StringAttr_VarName) << " "
-    //      << y << endl;
-    // }
 }
 
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////
-
+//////////////////////////////////// AUXILIARY METHODS //////////////////////////////////////////////////////////////
 SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &laser_poly)  //robot coordinates
 {
     TPPLPartition partition;
@@ -394,7 +332,7 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
         poly_part[i].y = l.y();
     }
     poly_part.SetOrientation(TPPL_CCW);
-    int r = partition.ConvexPartition_HM(&poly_part, &parts);
+    partition.ConvexPartition_HM(&poly_part, &parts);
     //partition.ConvexPartition_OPT(&poly_part, &parts);
     //int r = partition.Triangulate_OPT(&poly_part, &parts);
     //qInfo() << __FUNCTION__ << "Ok: " << r << "Num vertices:" << poly_part.GetNumPoints() << "Num res polys: " << parts.size();
@@ -429,7 +367,116 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
     return obstacles;
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////
+void SpecificWorker::ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out)
+{
+    if(pointList.size()<2)
+    {
+        qWarning() << "Not enough points to simplify";
+        return;
+    }
+
+    // Find the point with the maximum distance from line between start and end
+    auto line = Eigen::ParametrizedLine<float, 2>::Through(Eigen::Vector2f(pointList.front().first,pointList.front().second),
+                                                           Eigen::Vector2f(pointList.back().first,pointList.back().second));
+    auto max = std::max_element(pointList.begin()+1, pointList.end(), [line](auto &a, auto &b)
+    { return line.distance(Eigen::Vector2f(a.first, a.second)) < line.distance(Eigen::Vector2f(b.first, b.second));});
+    float dmax =  line.distance(Eigen::Vector2f((*max).first, (*max).second));
+
+    // If max distance is greater than epsilon, recursively simplify
+    if(dmax > epsilon)
+    {
+        // Recursive call
+        vector<Point> recResults1;
+        vector<Point> recResults2;
+        vector<Point> firstLine(pointList.begin(), max + 1);
+        vector<Point> lastLine(max, pointList.end());
+
+        ramer_douglas_peucker(firstLine, epsilon, recResults1);
+        ramer_douglas_peucker(lastLine, epsilon, recResults2);
+
+        // Build the result list
+        out.assign(recResults1.begin(), recResults1.end() - 1);
+        out.insert(out.end(), recResults2.begin(), recResults2.end());
+        if (out.size() < 2)
+        {
+            qWarning() << "Problem assembling output";
+            return;
+        }
+    }
+    else
+    {
+        //Just return start and end points
+        out.clear();
+        out.push_back(pointList.front());
+        out.push_back(pointList.back());
+    }
+}
+
+RoboCompGenericBase::TBaseState SpecificWorker::read_base()
+{
+    RoboCompGenericBase::TBaseState bState;
+    try
+    {
+        omnirobot_proxy->getBaseState(bState);
+        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, -bState.alpha, 0);
+        robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
+        robot_polygon->setPos(bState.x, bState.z);
+    }
+    catch(const Ice::Exception &e)
+    {
+        //    std::cout << "Error reading from Camera" << e << std::endl;
+    }
+    return bState;
+}
+
+QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
+{
+    QPolygonF laser_poly;
+    try
+    {
+        auto ldata = laser_proxy->getLaserData();
+
+        // Simplify laser contour with Ramer-Douglas-Peucker
+        std::vector<Point> plist(ldata.size());
+        std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable
+        { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
+        vector<Point> pointListOut;
+        ramer_douglas_peucker(plist, MAX_RDP_DEVIATION_mm, pointListOut);
+        laser_poly.resize(pointListOut.size());
+        std::generate(laser_poly.begin(), laser_poly.end(), [pointListOut, this, k=0]() mutable
+        { auto &p = pointListOut[k++]; return QPointF(p.first, p.second);});
+
+        // Filter out spikes. If the angle between two line segments is less than to the specified maximum angle
+        std::vector<QPointF> removed;
+        for(auto &&[k, ps] : iter::sliding_window(laser_poly,3) | iter::enumerate)
+            if( MAX_SPIKING_ANGLE_rads > acos(QVector2D::dotProduct( QVector2D(ps[0] - ps[1]).normalized(), QVector2D(ps[2] - ps[1]).normalized())))
+                removed.push_back(ps[1]);
+        for(auto &&r : removed)
+            laser_poly.erase(std::remove_if(laser_poly.begin(), laser_poly.end(), [r](auto &p) { return p == r; }), laser_poly.end());
+    }
+    catch(const Ice::Exception &e)
+    { std::cout << "Error reading from Laser" << e << std::endl;}
+    return laser_poly;  // robot coordinates
+}
+
+void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
+{
+    for(auto &[k, v] : grid)
+        if(laser_poly.containsPoint(QPointF(k.x, k.z), Qt::OddEvenFill))
+            v.free = true;
+        else
+            v.free = false;
+    grid.draw(&scene);
+}
+
+void SpecificWorker::stop_robot()
+{
+    omnirobot_proxy->setSpeedBase(0, 0, 0);
+    std::cout << "FINISH" << std::endl;
+    atTarget = true;
+}
+
+///////////////////////////////////// DRAWING /////////////////////////////////////////////////////////////////
 void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
 {
     graphicsView->setScene(&scene);
@@ -491,66 +538,6 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
         {  custom_plot.resize(signal_frame->size()); graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio); });
 }
 
-RoboCompGenericBase::TBaseState SpecificWorker::read_base()
-{
-    RoboCompGenericBase::TBaseState bState;
-    try
-    {
-        omnirobot_proxy->getBaseState(bState);
-        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, -bState.alpha, 0);
-        robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
-        robot_polygon->setPos(bState.x, bState.z);
-    }
-    catch(const Ice::Exception &e)
-    { 
-    //    std::cout << "Error reading from Camera" << e << std::endl;
-    }
-    return bState;
-}
-
-QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
-{
-    QPolygonF laser_poly;
-    try
-    {
-        auto ldata = laser_proxy->getLaserData();
-
-        // simplify laser contour with Ramer-Douglas-Peucker
-        std::vector<Point> plist(ldata.size());
-        std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable
-                    { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
-        vector<Point> pointListOut;
-        ramer_douglas_peucker(plist, 100, pointListOut);
-        laser_poly.resize(pointListOut.size());
-        std::generate(laser_poly.begin(), laser_poly.end(), [pointListOut, this, k=0]() mutable
-                      { auto &p = pointListOut[k++]; return QPointF(p.first, p.second);});
-
-        // Filter out spikes
-        // If the angle (in degrees) between two line segments is less than or equal to the specified maximum angle,
-        // then the middle point is a spike and is removed.
-        const float MAX_ANGLE = 0.2; // degrees
-        std::vector<QPointF> removed;
-        for(auto &&[k, ps] : iter::sliding_window(laser_poly,3) | iter::enumerate)
-            if( MAX_ANGLE > acos(QVector2D::dotProduct( QVector2D(ps[0] - ps[1]).normalized(), QVector2D(ps[2] - ps[1]).normalized())))
-                removed.push_back(ps[1]);
-        for(auto &&r : removed)
-            laser_poly.erase(std::remove_if(laser_poly.begin(), laser_poly.end(), [r](auto &p) { return p == r; }), laser_poly.end());
-    }
-    catch(const Ice::Exception &e)
-    { std::cout << "Error reading from Laser" << e << std::endl;}
-    return laser_poly;  // robot coordinates
-}
-
-void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
-{
-    for(auto &[k, v] : grid)
-        if(laser_poly.containsPoint(QPointF(k.x, k.z), Qt::OddEvenFill))
-            v.free = true;
-        else
-            v.free = false;
-    grid.draw(&scene);
-}
-
 void SpecificWorker::draw_laser(const QPolygonF &poly) // robot coordinates
 {
     static QGraphicsItem *laser_polygon = nullptr;
@@ -562,7 +549,6 @@ void SpecificWorker::draw_laser(const QPolygonF &poly) // robot coordinates
     laser_polygon = scene.addPolygon(robot_polygon->mapToScene(poly), QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(3);
 }
-
 void SpecificWorker::draw_path(const std::vector<QPointF> &path)
 {
     static std::vector<QGraphicsEllipseItem *> path_paint;
@@ -596,13 +582,6 @@ void SpecificWorker::draw_target(const RoboCompGenericBase::TBaseState &bState, 
     exGraph->data()->clear();
     ewGraph->data()->clear();
     timeGraph->data()->clear();
-}
-
-void SpecificWorker::stop_robot()
-{
-    omnirobot_proxy->setSpeedBase(0, 0, 0);
-    std::cout << "FINISH" << std::endl;
-    atTarget = true;
 }
 
 void SpecificWorker::draw(const ControlVector &control, float pos_error, float rot_error, float time_elapsed)
@@ -659,52 +638,7 @@ void SpecificWorker::draw_partitions(const Obstacles &obstacles, bool print)
     }
 }
 
-void SpecificWorker::ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out)
-{
-    if(pointList.size()<2)
-    {
-        qWarning() << "Not enough points to simplify";
-        return;
-    }
-
-    // Find the point with the maximum distance from line between start and end
-    auto line = Eigen::ParametrizedLine<float, 2>::Through(Eigen::Vector2f(pointList.front().first,pointList.front().second),
-                                                           Eigen::Vector2f(pointList.back().first,pointList.back().second));
-    auto max = std::max_element(pointList.begin()+1, pointList.end(), [line](auto &a, auto &b)
-                { return line.distance(Eigen::Vector2f(a.first, a.second)) < line.distance(Eigen::Vector2f(b.first, b.second));});
-    float dmax =  line.distance(Eigen::Vector2f((*max).first, (*max).second));
-
-    // If max distance is greater than epsilon, recursively simplify
-    if(dmax > epsilon)
-    {
-        // Recursive call
-        vector<Point> recResults1;
-        vector<Point> recResults2;
-        vector<Point> firstLine(pointList.begin(), max + 1);
-        vector<Point> lastLine(max, pointList.end());
-
-        ramer_douglas_peucker(firstLine, epsilon, recResults1);
-        ramer_douglas_peucker(lastLine, epsilon, recResults2);
-
-        // Build the result list
-        out.assign(recResults1.begin(), recResults1.end() - 1);
-        out.insert(out.end(), recResults2.begin(), recResults2.end());
-        if (out.size() < 2)
-        {
-            qWarning() << "Problem assembling output";
-            return;
-        }
-    }
-    else
-    {
-        //Just return start and end points
-        out.clear();
-        out.push_back(pointList.front());
-        out.push_back(pointList.back());
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////// TESTING /////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {
 	std::cout << "Startup check" << std::endl;
