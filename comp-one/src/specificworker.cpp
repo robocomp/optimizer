@@ -126,11 +126,11 @@ void SpecificWorker::compute()
                 float y = control_vars[1].get(GRB_DoubleAttr_X);
                 float a = control_vars[2].get(GRB_DoubleAttr_X);
                 qDebug()<<"CONTROL"<<x<<y<<a;
-                if(fabs(a)>0.1)
-                {
-                    x = 0;
-                    y = 0;
-                }
+//                if(fabs(a)>0.1)
+//                {
+//                    x = 0;
+//                    y = 0;
+//                }
                 omnirobot_proxy->setSpeedBase(x, y, a);
                 // draw
                 draw(ControlVector(x, y, a), pos_error, rot_error, duration);
