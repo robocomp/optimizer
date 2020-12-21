@@ -255,10 +255,10 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         model->update();
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == current_state.x(), "c1x");
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
-        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 2] == current_state[2], "c1a");
+        model->addConstr(state_vars[(NUM_STEPS/2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
         
         // add new obstacle restrictions
-        float DW = 400.f, DL = 400.f;
+        float DW = 500.f, DL = 500.f;
         std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size());
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
