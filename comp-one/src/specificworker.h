@@ -38,6 +38,7 @@
 #include <doublebuffer/DoubleBuffer.h>
 #include "polypartition.h"
 
+
 class MyScene : public QGraphicsScene
 {
     Q_OBJECT
@@ -50,7 +51,6 @@ protected:
 
 using namespace std::literals;
 
-typedef std::pair<double, double> Point;
 class SpecificWorker : public GenericWorker
 {
     Q_OBJECT
@@ -116,15 +116,24 @@ class SpecificWorker : public GenericWorker
         bool atTarget = true;
 
         // Grid
+        Grid<>::Dimensions dim;  //default values//
         Grid<> grid;
         MyScene scene;
         QGraphicsItem *robot_polygon = nullptr;
         void fill_grid(const QPolygonF &ldata);
 
+        // map
+        std::vector<QPolygonF> read_map_obstacles();
+        std::vector<QPolygonF> map_obstacles;
+
         // convex parrtitions
-        using Line = std::vector<std::tuple<float, float, float>>;
-        using Obstacles = std::vector<std::tuple<Line, QPolygonF>>;
+
+        using Point = std::pair<float, float>;  //only for RDP, change to QPointF
+        using Lines = std::vector<std::tuple<float, float, float>>;
+        using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
+
         Obstacles compute_laser_partitions(QPolygonF  &laser_poly);
+        Obstacles compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles, const QPolygonF &laser_poly);
         void ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
 
         // Model and optimizations

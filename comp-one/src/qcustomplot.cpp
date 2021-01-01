@@ -14576,7 +14576,7 @@ bool QCustomPlot::savePdf(const QString &fileName, int width, int height, QCP::E
 /*!
   Saves a PNG image file to \a fileName on disc. The output plot will have the dimensions \a width
   and \a height in pixels, multiplied by \a scale. If either \a width or \a height is zero, the
-  current width and height of the QCustomPlot widget is used instead. Line widths and texts etc.
+  current width and height of the QCustomPlot widget is used instead. Lines widths and texts etc.
   are not scaled up when larger widths/heights are used. If you want that effect, use the \a scale
   parameter.
 
@@ -14626,7 +14626,7 @@ bool QCustomPlot::savePng(const QString &fileName, int width, int height, double
 /*!
   Saves a JPEG image file to \a fileName on disc. The output plot will have the dimensions \a width
   and \a height in pixels, multiplied by \a scale. If either \a width or \a height is zero, the
-  current width and height of the QCustomPlot widget is used instead. Line widths and texts etc.
+  current width and height of the QCustomPlot widget is used instead. Lines widths and texts etc.
   are not scaled up when larger widths/heights are used. If you want that effect, use the \a scale
   parameter.
 
@@ -14673,7 +14673,7 @@ bool QCustomPlot::saveJpg(const QString &fileName, int width, int height, double
 /*!
   Saves a BMP image file to \a fileName on disc. The output plot will have the dimensions \a width
   and \a height in pixels, multiplied by \a scale. If either \a width or \a height is zero, the
-  current width and height of the QCustomPlot widget is used instead. Line widths and texts etc.
+  current width and height of the QCustomPlot widget is used instead. Lines widths and texts etc.
   are not scaled up when larger widths/heights are used. If you want that effect, use the \a scale
   parameter.
 
@@ -22250,7 +22250,7 @@ void QCPCurve::drawScatterPlot(QCPPainter *painter, const QVector<QPointF> &poin
   Called by \ref draw to generate points in pixel coordinates which represent the line of the
   curve.
 
-  Line segments that aren't visible in the current axis rect are handled in an optimized way. They
+  Lines segments that aren't visible in the current axis rect are handled in an optimized way. They
   are projected onto a rectangle slightly larger than the visible axis rect and simplified
   regarding point count. The algorithm makes sure to preserve appearance of lines and fills inside
   the visible axis rect by generating new temporary points on the outer rect if necessary.
@@ -28250,7 +28250,7 @@ QPen QCPItemStraightLine::mainPen() const
 /*! \class QCPItemLine
   \brief A line from one point to another
 
-  \image html QCPItemLine.png "Line example. Blue dotted circles are anchors, solid blue discs are positions."
+  \image html QCPItemLine.png "Lines example. Blue dotted circles are anchors, solid blue discs are positions."
 
   It has two positions, \a start and \a end, which define the end points of the line.
   

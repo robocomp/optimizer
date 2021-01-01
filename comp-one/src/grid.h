@@ -90,6 +90,8 @@ class Grid
         Dimensions dim;
 
         void initialize(QGraphicsScene* scene, Dimensions dim_, bool read_from_file = true, const std::string &file_name = std::string());
+        void fill_with_obstacles(std::vector<QPolygonF> world_obstacles);
+
         std::tuple<bool, T &> getCell(long int x, long int z);
         std::tuple<bool, T &> getCell(const Key &k);
         T at(const Key &k) const                            { return fmap.at(k);};

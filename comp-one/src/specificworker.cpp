@@ -21,6 +21,7 @@
 //#include <ranges>
 #include <cppitertools/chunked.hpp>
 #include <cppitertools/sliding_window.hpp>
+#include <cppitertools/reversed.hpp>
 
 
 /**
@@ -59,16 +60,23 @@ void SpecificWorker::initialize(int period)
 	std::cout << "Initialize worker" << std::endl;
 
 	//grid
-	Grid<>::Dimensions dim;  //default values
-    grid.initialize(&scene, dim);
+    //grid.initialize(&scene, dim);
+    //grid.fill_with_obstacles(world_obstacles);
 
     //view
     init_drawing(dim);
 
+    // external map
+    map_obstacles = read_map_obstacles();
+
     // model
     auto laser_poly = read_laser();
-    auto obstacles = compute_laser_partitions(laser_poly);
-    initialize_model(StateVector(0,0,0), obstacles);
+    auto laser_free_regions = compute_laser_partitions(laser_poly);
+    auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly);
+    std::vector<tuple<Lines, QPolygonF>> free_regions;
+    free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
+    free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
+    initialize_model(StateVector(0,0,0), free_regions);
 
 	this->Period = period;
 	if(this->startup_check_flag)
@@ -83,8 +91,12 @@ void SpecificWorker::compute()
     auto bState = read_base();
     auto laser_poly = read_laser();  // returns poly in robot coordinates
     draw_laser(laser_poly);
-    auto obstacles = compute_laser_partitions(laser_poly);
-    draw_partitions(obstacles, false);
+    auto laser_free_regions = compute_laser_partitions(laser_poly);
+    auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly);
+    std::vector<tuple<Lines, QPolygonF>> free_regions;
+    free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
+    free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
+    draw_partitions(free_regions, false);
 
     // fill_grid(laser_poly);
 
@@ -109,7 +121,7 @@ void SpecificWorker::compute()
         else
         {
             auto t = std::chrono::high_resolution_clock::now();
-            optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), obstacles);
+            optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions);
             auto now = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( now - t ).count();
             //std::cout << "optimize " << duration3 << " ms" << std::endl;
@@ -127,10 +139,7 @@ void SpecificWorker::compute()
                 float a = control_vars[2].get(GRB_DoubleAttr_X);
                 qDebug()<<"CONTROL"<<x<<y<<a;
 //                if(fabs(a)>0.1)
-//                {
-//                    x = 0;
-//                    y = 0;
-//                }
+//                {   x = 0; y = 0;  }
                 omnirobot_proxy->setSpeedBase(x, y, a);
                 // draw
                 draw(ControlVector(x, y, a), pos_error, rot_error, duration);
@@ -271,7 +280,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
                 GRBVar temp_and_vars[obstacles.size()];
                 for (auto &&[k, obs] : iter::enumerate(obstacles))
                 {
-                    auto obs_line = std::get<Line>(obs);  // get Line form the tupla
+                    auto obs_line = std::get<Lines>(obs);  // get Lines form the tupla
                     ObsData::PolyData pdata;
                     pdata.line_vars.resize(obs_line.size());
                     pdata.line_constraints.resize(obs_line.size());
@@ -318,6 +327,7 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
 }
 
 //////////////////////////////////// AUXILIARY METHODS //////////////////////////////////////////////////////////////
+/// computes covex decomposition using polypartition library at https://github.com/ivanfratric/polypartition
 SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &laser_poly)  //robot coordinates
 {
     TPPLPartition partition;
@@ -352,7 +362,87 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
         });
 
         // generate vector of <A,B,C> tuples
-        Line line(num_points);
+        Lines line(num_points);
+        std::generate(line.begin(), line.end(),[poly_res, k=0, num_points]() mutable
+        {
+            float x1 = poly_res.GetPoint(k).x;
+            float y1 = poly_res.GetPoint(k).y;
+            float x2 = poly_res.GetPoint((++k) % num_points).x;
+            float y2 = poly_res.GetPoint((k) % num_points).y;
+            float norm = sqrt(pow(y1-y2, 2) + pow(x2-x1, 2));
+            return std::make_tuple((y1 - y2)/norm, (x2 - x1)/norm, -((y1 - y2)*x1 + (x2 - x1)*y1)/norm);
+        });
+        obstacles[k] = std::make_tuple(line, poly_draw);
+    }
+    return obstacles;
+}
+
+/// compute covex polygons outside the laser field
+SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles, const QPolygonF &laser_poly)
+{
+    // get the complete external contour
+    QPolygonF pe = robot_polygon->mapFromScene(QPolygonF(QRectF(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT)));  // world rectangle to robot coordinates
+    TPPLPoly external_poly;
+    external_poly.Init(pe.size());      // external rectangle
+    external_poly.SetHole(false);
+    for(auto &&[i, p] : iter::enumerate(iter::reversed(pe)))
+    {
+        external_poly[i].x = p.x();
+        external_poly[i].y = p.y();
+    }
+    external_poly.SetOrientation(TPPL_CCW);
+
+    // laser hole
+    TPPLPoly laser_hole;
+    laser_hole.Init(laser_poly.size());
+    laser_hole.SetHole(true);
+    for(auto &&[i, l] : iter::enumerate(iter::reversed(laser_poly)))   // clock wise order of vertices
+    {
+        laser_hole[i].x = l.x();
+        laser_hole[i].y = l.y();
+    }
+    laser_hole.SetOrientation(TPPL_CW);
+
+    TPPLPolyList external_poly_list{ external_poly , laser_hole };
+
+    // map obstacles as holes
+    for(auto &poly : map_obstacles)
+    {
+        auto lpoly = robot_polygon->mapFromScene(poly);  // convert to robot coordinates
+        TPPLPoly hole;
+        hole.Init(lpoly.size());
+        hole.SetHole(true);
+        for(auto &&[i, l] : iter::enumerate(iter::reversed(lpoly)))  // clock wise order of vertices
+        {
+            hole[i].x = l.x();
+            hole[i].y = l.y();
+        }
+        hole.SetOrientation(TPPL_CW);
+        external_poly_list.insert( external_poly_list.end(), hole );
+    }
+
+    TPPLPartition partition;
+    TPPLPolyList result, convex_result;
+    partition.RemoveHoles(&external_poly_list, &result);
+    int re = partition.ConvexPartition_HM(&result, &convex_result);
+    qInfo() << __FUNCTION__ << "External convex res: " << re << "Num res polys: " << convex_result.size();
+
+    Obstacles obstacles(convex_result.size());
+    for(auto &&[k, poly_res] : iter::enumerate(convex_result))
+    {
+        //color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
+        auto num_points = poly_res.GetNumPoints();
+
+        // generate QPolygons for drawing
+        QPolygonF poly_draw(num_points);
+        std::generate(poly_draw.begin(), poly_draw.end(), [poly_res, k=0, robot = robot_polygon]() mutable
+        {
+            auto &p = poly_res.GetPoint(k++);
+            return robot-> mapToScene(QPointF(p.x, p.y));
+        });
+
+        // generate vector of <A,B,C> tuples
+        Lines line(num_points);
         std::generate(line.begin(), line.end(),[poly_res, k=0, num_points]() mutable
         {
             float x1 = poly_res.GetPoint(k).x;
@@ -376,10 +466,10 @@ void SpecificWorker::ramer_douglas_peucker(const vector<Point> &pointList, doubl
     }
 
     // Find the point with the maximum distance from line between start and end
-    auto line = Eigen::ParametrizedLine<float, 2>::Through(Eigen::Vector2f(pointList.front().first,pointList.front().second),
-                                                           Eigen::Vector2f(pointList.back().first,pointList.back().second));
+    auto line = Eigen::ParametrizedLine<float, 2>::Through(Eigen::Vector2f(pointList.front().first, pointList.front().second),
+                                                           Eigen::Vector2f(pointList.back().first, pointList.back().second));
     auto max = std::max_element(pointList.begin()+1, pointList.end(), [line](auto &a, auto &b)
-    { return line.distance(Eigen::Vector2f(a.first, a.second)) < line.distance(Eigen::Vector2f(b.first, b.second));});
+             { return line.distance(Eigen::Vector2f(a.first, a.second)) < line.distance(Eigen::Vector2f(b.first, b.second));});
     float dmax =  line.distance(Eigen::Vector2f((*max).first, (*max).second));
 
     // If max distance is greater than epsilon, recursively simplify
@@ -439,12 +529,12 @@ QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
         // Simplify laser contour with Ramer-Douglas-Peucker
         std::vector<Point> plist(ldata.size());
         std::generate(plist.begin(), plist.end(), [ldata, k=0]() mutable
-        { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
+               { auto &l = ldata[k++]; return std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));});
         vector<Point> pointListOut;
         ramer_douglas_peucker(plist, MAX_RDP_DEVIATION_mm, pointListOut);
         laser_poly.resize(pointListOut.size());
         std::generate(laser_poly.begin(), laser_poly.end(), [pointListOut, this, k=0]() mutable
-        { auto &p = pointListOut[k++]; return QPointF(p.first, p.second);});
+              { auto &p = pointListOut[k++]; return QPointF(p.first, p.second);});
 
         // Filter out spikes. If the angle between two line segments is less than to the specified maximum angle
         std::vector<QPointF> removed;
@@ -476,6 +566,14 @@ void SpecificWorker::stop_robot()
     atTarget = true;
 }
 
+std::vector<QPolygonF> SpecificWorker::read_map_obstacles()  // read obstacles existing in Coppelia world
+{
+    std::vector<QPolygonF> map_obstacles;
+    //map_obstacles.emplace_back(QPolygonF(QRectF( QPointF(-1435-1000, 800+200), QSizeF(2000, 400))));
+    //map_obstacles.emplace_back(QPolygonF(QRectF( QPointF(1458-1000, 800+200), QSizeF(2000, 400))));
+    //map_obstacles.emplace_back(QPolygonF(QRectF( QPointF(90-200, -1175+200), QSizeF(400, 400))));
+    return map_obstacles;
+}
 ///////////////////////////////////// DRAWING /////////////////////////////////////////////////////////////////
 void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
 {
@@ -616,7 +714,7 @@ void SpecificWorker::draw_partitions(const Obstacles &obstacles, bool print)
     for(auto &obs : obstacles)
     {
         bool inside = true;
-        for (auto &[A, B, C] : std::get<Line>(obs))
+        for (auto &[A, B, C] : std::get<Lines>(obs))
             inside = inside and C > 0;
         if (inside)
             polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30), QBrush(color)));
