@@ -29,8 +29,10 @@
 */
 SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorker(tprx)
 {
-	this->startup_check_flag = startup_check;
-    readSettings();
+    qInfo() << "hola";
+
+    this->startup_check_flag = startup_check;
+	readSettings();
 }
 
 /**
@@ -96,7 +98,7 @@ void SpecificWorker::compute()
     std::vector<tuple<Lines, QPolygonF>> free_regions;
     free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
     free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
-    draw_partitions(free_regions, false);
+    draw_partitions(free_regions, QColor("Magenta"),false);
 
     // fill_grid(laser_poly);
 
@@ -137,9 +139,7 @@ void SpecificWorker::compute()
                 float x = control_vars[0].get(GRB_DoubleAttr_X);
                 float y = control_vars[1].get(GRB_DoubleAttr_X);
                 float a = control_vars[2].get(GRB_DoubleAttr_X);
-                qDebug()<<"CONTROL"<<x<<y<<a;
-//                if(fabs(a)>0.1)
-//                {   x = 0; y = 0;  }
+                //qDebug()<<"CONTROL"<<x<<y<<a;
                 omnirobot_proxy->setSpeedBase(x, y, a);
                 // draw
                 draw(ControlVector(x, y, a), pos_error, rot_error, duration);
@@ -160,6 +160,7 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     // Create initial model
     env.set(GRB_IntParam_OutputFlag, 0);
     model = new GRBModel(env);
+
     model->set(GRB_StringAttr_ModelName, "path_optimization");
     model_vars = model->addVars((STATE_DIM + CONTROL_DIM) * NUM_STEPS, GRB_CONTINUOUS);
     state_vars = &(model_vars[0]);
@@ -424,14 +425,22 @@ SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Di
     TPPLPartition partition;
     TPPLPolyList result, convex_result;
     partition.RemoveHoles(&external_poly_list, &result);
-    int re = partition.ConvexPartition_HM(&result, &convex_result);
-    qInfo() << __FUNCTION__ << "External convex res: " << re << "Num res polys: " << convex_result.size();
+    partition.ConvexPartition_HM(&result, &convex_result);
+    //qInfo() << __FUNCTION__ << "External convex res: " << re << "Num res polys: " << convex_result.size();
 
     Obstacles obstacles(convex_result.size());
     for(auto &&[k, poly_res] : iter::enumerate(convex_result))
     {
-        //color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
+        // remove small polygons
         auto num_points = poly_res.GetNumPoints();
+        float area = 0.0; int j = num_points-1;
+        for(auto i: iter::range(num_points)) // compute area
+        {
+            area += (poly_res[j].x + poly_res[i].x) * (poly_res[j].y - poly_res[i].y);
+            j=i;
+        }
+        if(fabs(area) < 100)
+            continue;
 
         // generate QPolygons for drawing
         QPolygonF poly_draw(num_points);
@@ -456,7 +465,6 @@ SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Di
     }
     return obstacles;
 }
-
 void SpecificWorker::ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out)
 {
     if(pointList.size()<2)
@@ -501,7 +509,6 @@ void SpecificWorker::ramer_douglas_peucker(const vector<Point> &pointList, doubl
         out.push_back(pointList.back());
     }
 }
-
 RoboCompGenericBase::TBaseState SpecificWorker::read_base()
 {
     RoboCompGenericBase::TBaseState bState;
@@ -518,7 +525,6 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     }
     return bState;
 }
-
 QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
 {
     QPolygonF laser_poly;
@@ -548,7 +554,6 @@ QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
     { std::cout << "Error reading from Laser" << e << std::endl;}
     return laser_poly;  // robot coordinates
 }
-
 void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
 {
     for(auto &[k, v] : grid)
@@ -558,7 +563,6 @@ void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
             v.free = false;
     grid.draw(&scene);
 }
-
 void SpecificWorker::stop_robot()
 {
     omnirobot_proxy->setSpeedBase(0, 0, 0);
@@ -702,26 +706,25 @@ void SpecificWorker::draw(const ControlVector &control, float pos_error, float r
     custom_plot.replot();
 }
 
-void SpecificWorker::draw_partitions(const Obstacles &obstacles, bool print)
+void SpecificWorker::draw_partitions(const Obstacles &obstacles, const QColor &color, bool print)
 {
     static std::vector<QGraphicsPolygonItem *> polys_ptr{};
     for (auto p: polys_ptr)
         scene.removeItem(p);
     polys_ptr.clear();
 
-    QColor color("LightBlue");
-    QColor color_edge;
+    QColor color_inside("LightBlue");
     for(auto &obs : obstacles)
     {
         bool inside = true;
         for (auto &[A, B, C] : std::get<Lines>(obs))
             inside = inside and C > 0;
         if (inside)
-            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30), QBrush(color)));
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color_inside, 30), QBrush(color_inside)));
         else
         {
-            color_edge.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
-            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color_edge, 30)));
+            //color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30)));
         }
     }
     if(print)

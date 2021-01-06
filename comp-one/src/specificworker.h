@@ -118,8 +118,6 @@ class SpecificWorker : public GenericWorker
         // Grid
         Grid<>::Dimensions dim;  //default values//
         Grid<> grid;
-        MyScene scene;
-        QGraphicsItem *robot_polygon = nullptr;
         void fill_grid(const QPolygonF &ldata);
 
         // map
@@ -127,7 +125,6 @@ class SpecificWorker : public GenericWorker
         std::vector<QPolygonF> map_obstacles;
 
         // convex parrtitions
-
         using Point = std::pair<float, float>;  //only for RDP, change to QPointF
         using Lines = std::vector<std::tuple<float, float, float>>;
         using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
@@ -185,12 +182,14 @@ class SpecificWorker : public GenericWorker
         // Draw
         QCustomPlot custom_plot;
         QCPGraph *xGraph, *yGraph, *wGraph, *exGraph, *ewGraph, *timeGraph;
+        MyScene scene;
+        QGraphicsItem *robot_polygon = nullptr;
         void init_drawing( Grid<>::Dimensions dim);
         QGraphicsEllipseItem *target_draw = nullptr;
         void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
         void draw_laser(const QPolygonF &poly);
         void draw(const ControlVector &control, float pos_error, float rot_error, float time_elapsed);
-        void draw_partitions(const Obstacles &obstacles, bool print=false);
+        void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
         int cont=0;
 
 };

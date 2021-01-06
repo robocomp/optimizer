@@ -19,7 +19,7 @@ SET ( HEADERS
 set(CMAKE_CXX_STANDARD 20)
 
 #add_definitions(-O3 -march=native  -fmax-errors=5 )
-add_definitions(-g   -fmax-errors=5 )
+#add_definitions(-g   -fmax-errors=5 )
 
 
 include_directories($ENV{GUROBI_HOME}/include/)
@@ -28,6 +28,5 @@ link_directories($ENV{GUROBI_HOME}/lib/)
 
 find_package( Qt5PrintSupport )
 
-SET (LIBS ${LIBS} gurobi_c++ gurobi91 Qt5::PrintSupport)
-
+SET (LIBS ${LIBS}  gurobi_c++ gurobi91 Qt5::PrintSupport)
 
