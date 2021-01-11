@@ -37,7 +37,7 @@
 #include "qcustomplot.h"
 #include <doublebuffer/DoubleBuffer.h>
 #include "polypartition.h"
-
+#include "callback.h"
 
 class MyScene : public QGraphicsScene
 {
@@ -48,8 +48,6 @@ protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *event)
     { emit new_target(event); }
 };
-
-using namespace std::literals;
 
 class SpecificWorker : public GenericWorker
 {
@@ -93,7 +91,7 @@ class SpecificWorker : public GenericWorker
         // constants
         const float MAX_SPIKING_ANGLE_rads = 0.2;
         const float MAX_RDP_DEVIATION_mm  =  70;
-        const uint NUM_STEPS = 6;
+        const uint NUM_STEPS = 15;
         constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
         constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
 
@@ -177,7 +175,8 @@ class SpecificWorker : public GenericWorker
         std::vector<ObsData> obs_contraints;
         GRBVar *sin_cos_vars;
         void initialize_model(const StateVector &target, const Obstacles &obstacles);
-        void optimize(const StateVector &current_state,  const Obstacles &obstacles);
+        void optimize(const StateVector &target_state,  const Obstacles &obstacles);
+        Callback *callback;
 
         // Draw
         QCustomPlot custom_plot;

@@ -22,7 +22,9 @@
 #include <cppitertools/chunked.hpp>
 #include <cppitertools/sliding_window.hpp>
 #include <cppitertools/reversed.hpp>
+#include <cppitertools/filter.hpp>
 
+using namespace std::literals;
 
 /**
 * \brief Default constructor
@@ -87,16 +89,15 @@ void SpecificWorker::initialize(int period)
 		timer.start(Period);
 }
 
-
 void SpecificWorker::compute()
 {
     auto bState = read_base();
     auto laser_poly = read_laser();  // returns poly in robot coordinates
-    draw_laser(laser_poly);
-    auto laser_free_regions = compute_laser_partitions(laser_poly);
+    //draw_laser(laser_poly);
+    //auto laser_free_regions = compute_laser_partitions(laser_poly);
     auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly);
     std::vector<tuple<Lines, QPolygonF>> free_regions;
-    free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
+ //   free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
     free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
     draw_partitions(free_regions, QColor("Magenta"),false);
 
@@ -107,8 +108,6 @@ void SpecificWorker::compute()
     {
         //set target
         target.setX(t.value().x()); target.setY(t.value().y());
-
-        // draw
         draw_target(bState, t.value());
     }
     if(not atTarget)
@@ -126,13 +125,13 @@ void SpecificWorker::compute()
             optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions);
             auto now = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( now - t ).count();
-            //std::cout << "optimize " << duration3 << " ms" << std::endl;
+            std::cout << "optimize " << duration << " ms" << std::endl;
 
             int status = model->get(GRB_IntAttr_Status);
             if(status != GRB_OPTIMAL)
             {
                 omnirobot_proxy->setSpeedBase(0, 0, 0);
-                qInfo() << __FUNCTION__ << "Result status:" << status << " Aborting.";
+                qInfo() << __FUNCTION__ << "Result status:" << status;
             }
             else
             {
@@ -154,7 +153,6 @@ void SpecificWorker::compute()
 void SpecificWorker::initialize_model(const StateVector &target, const Obstacles &obstacles)
 {
     // Create environment
-    //env = new GRBEnv("path_optimization.log");
     //env.set("LogFile", "path_optimization.log");
     
     // Create initial model
@@ -162,6 +160,10 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     model = new GRBModel(env);
 
     model->set(GRB_StringAttr_ModelName, "path_optimization");
+    int numvars = model->get(GRB_IntAttr_NumVars);
+    auto vars = model->getVars();
+    callback = new Callback(numvars, vars);
+    model->setCallback(callback);
     model_vars = model->addVars((STATE_DIM + CONTROL_DIM) * NUM_STEPS, GRB_CONTINUOUS);
     state_vars = &(model_vars[0]);
     control_vars = &(model_vars[STATE_DIM * NUM_STEPS]);
@@ -249,8 +251,9 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     model->update();
 }
 
-void SpecificWorker::optimize(const StateVector &current_state, const Obstacles &obstacles)
+void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &obstacles)
 {
+    //qInfo() << "states " << obstacles.size();
     try
     {
         model->remove(model->getConstrByName("c1x"));
@@ -261,15 +264,16 @@ void SpecificWorker::optimize(const StateVector &current_state, const Obstacles 
         for (auto &constr : obs_contraints)
             constr.clear(model);
         obs_contraints.clear();
-
         model->update();
-        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == current_state.x(), "c1x");
-        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == current_state.y(), "c1y");
-        model->addConstr(state_vars[(NUM_STEPS/2 - 1) * STATE_DIM + 2] == current_state[2], "c1a");
+
+        // target state restriction
+        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target_state.x(), "c1x");
+        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target_state.y(), "c1y");
+        model->addConstr(state_vars[(NUM_STEPS/2 - 1) * STATE_DIM + 2] == target_state[2], "c1a");
         
         // add new obstacle restrictions
-        float DW = 500.f, DL = 500.f;
-        std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
+        const float DW = 450.f, DL = 300.f;
+        static std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size());
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
         {
@@ -383,28 +387,28 @@ SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Di
 {
     // get the complete external contour
     QPolygonF pe = robot_polygon->mapFromScene(QPolygonF(QRectF(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT)));  // world rectangle to robot coordinates
+    pe.pop_back();
     TPPLPoly external_poly;
     external_poly.Init(pe.size());      // external rectangle
-    external_poly.SetHole(false);
     for(auto &&[i, p] : iter::enumerate(iter::reversed(pe)))
     {
         external_poly[i].x = p.x();
         external_poly[i].y = p.y();
     }
+    external_poly.SetHole(false);
     external_poly.SetOrientation(TPPL_CCW);
+    TPPLPolyList external_poly_list{ external_poly};
 
     // laser hole
     TPPLPoly laser_hole;
     laser_hole.Init(laser_poly.size());
-    laser_hole.SetHole(true);
     for(auto &&[i, l] : iter::enumerate(iter::reversed(laser_poly)))   // clock wise order of vertices
     {
         laser_hole[i].x = l.x();
         laser_hole[i].y = l.y();
     }
-    laser_hole.SetOrientation(TPPL_CW);
-
-    TPPLPolyList external_poly_list{ external_poly , laser_hole };
+    laser_hole.SetHole(true);
+    //external_poly_list.insert( external_poly_list.end(), laser_hole);
 
     // map obstacles as holes
     for(auto &poly : map_obstacles)
@@ -412,24 +416,22 @@ SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Di
         auto lpoly = robot_polygon->mapFromScene(poly);  // convert to robot coordinates
         TPPLPoly hole;
         hole.Init(lpoly.size());
-        hole.SetHole(true);
         for(auto &&[i, l] : iter::enumerate(iter::reversed(lpoly)))  // clock wise order of vertices
         {
             hole[i].x = l.x();
             hole[i].y = l.y();
         }
-        hole.SetOrientation(TPPL_CW);
+        hole.SetHole(true);
         external_poly_list.insert( external_poly_list.end(), hole );
     }
 
     TPPLPartition partition;
-    TPPLPolyList result, convex_result;
-    partition.RemoveHoles(&external_poly_list, &result);
-    partition.ConvexPartition_HM(&result, &convex_result);
-    //qInfo() << __FUNCTION__ << "External convex res: " << re << "Num res polys: " << convex_result.size();
+    TPPLPolyList convex_result;
+    partition.ConvexPartition_HM(&external_poly_list, &convex_result);
+//    qInfo() << __FUNCTION__ << "Num res polys: " << convex_result.size();
 
-    Obstacles obstacles(convex_result.size());
-    for(auto &&[k, poly_res] : iter::enumerate(convex_result))
+    Obstacles obstacles;
+    for(auto &&[k, poly_res] : iter::enumerate(iter::filter([](auto &p){ return not p.IsHole(); }, convex_result)))
     {
         // remove small polygons
         auto num_points = poly_res.GetNumPoints();
@@ -439,7 +441,7 @@ SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Di
             area += (poly_res[j].x + poly_res[i].x) * (poly_res[j].y - poly_res[i].y);
             j=i;
         }
-        if(fabs(area) < 100)
+        if(fabs(area) < 500000)
             continue;
 
         // generate QPolygons for drawing
@@ -461,8 +463,9 @@ SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Di
             float norm = sqrt(pow(y1-y2, 2) + pow(x2-x1, 2));
             return std::make_tuple((y1 - y2)/norm, (x2 - x1)/norm, -((y1 - y2)*x1 + (x2 - x1)*y1)/norm);
         });
-        obstacles[k] = std::make_tuple(line, poly_draw);
+        obstacles.emplace_back(std::make_tuple(line, poly_draw));
     }
+    //qInfo() << __FUNCTION__ << "Obstacles: " << obstacles.size();
     return obstacles;
 }
 void SpecificWorker::ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out)
@@ -552,6 +555,7 @@ QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
     }
     catch(const Ice::Exception &e)
     { std::cout << "Error reading from Laser" << e << std::endl;}
+    laser_poly.pop_back();
     return laser_poly;  // robot coordinates
 }
 void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
@@ -570,12 +574,18 @@ void SpecificWorker::stop_robot()
     atTarget = true;
 }
 
-std::vector<QPolygonF> SpecificWorker::read_map_obstacles()  // read obstacles existing in Coppelia world
+std::vector<QPolygonF> SpecificWorker::read_map_obstacles()
 {
     std::vector<QPolygonF> map_obstacles;
-    //map_obstacles.emplace_back(QPolygonF(QRectF( QPointF(-1435-1000, 800+200), QSizeF(2000, 400))));
-    //map_obstacles.emplace_back(QPolygonF(QRectF( QPointF(1458-1000, 800+200), QSizeF(2000, 400))));
-    //map_obstacles.emplace_back(QPolygonF(QRectF( QPointF(90-200, -1175+200), QSizeF(400, 400))));
+    QPolygonF p1(QRectF( QPointF(-1435-1000, 800-300), QSizeF(2000, 600)));
+    p1.pop_back();  // remove last point because last point is the same as one
+    map_obstacles.emplace_back(p1);
+    QPolygonF p2(QRectF( QPointF(1458-1000, 800-300), QSizeF(2000, 600)));
+    p2.pop_back();
+    map_obstacles.emplace_back(p2);
+    QPolygonF p3(QRectF( QPointF(90-300, -1175-300), QSizeF(600, 600)));
+    p3.pop_back();
+    map_obstacles.emplace_back(p3);
     return map_obstacles;
 }
 ///////////////////////////////////// DRAWING /////////////////////////////////////////////////////////////////
@@ -654,7 +664,7 @@ void SpecificWorker::draw_laser(const QPolygonF &poly) // robot coordinates
 void SpecificWorker::draw_path(const std::vector<QPointF> &path)
 {
     static std::vector<QGraphicsEllipseItem *> path_paint;
-    static QString path_color = "#FF00FF";
+    static QString path_color = "DarkBlue";
 
     for(auto p : path_paint)
         scene.removeItem(p);
@@ -701,7 +711,7 @@ void SpecificWorker::draw(const ControlVector &control, float pos_error, float r
     wGraph->addData(cont, control[2]*300);
     exGraph->addData(cont, pos_error);
     ewGraph->addData(cont,rot_error*300);
-    timeGraph->addData(cont,time_elapsed*10);
+    timeGraph->addData(cont,time_elapsed);
     cont++;
     custom_plot.replot();
 }
@@ -713,18 +723,21 @@ void SpecificWorker::draw_partitions(const Obstacles &obstacles, const QColor &c
         scene.removeItem(p);
     polys_ptr.clear();
 
-    QColor color_inside("LightBlue");
+    const QColor color_inside("LightBlue");
+    const QColor color_outside("LightPink");
     for(auto &obs : obstacles)
     {
         bool inside = true;
         for (auto &[A, B, C] : std::get<Lines>(obs))
-            inside = inside and C > 0;
+        {
+            inside = inside and C > 0; // since ABC were computed in the robot's coordinate frame
+        }
         if (inside)
             polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color_inside, 30), QBrush(color_inside)));
         else
         {
             //color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
-            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30)));
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30), QBrush(color_outside)));
         }
     }
     if(print)
