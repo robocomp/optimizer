@@ -91,7 +91,7 @@ class SpecificWorker : public GenericWorker
         // constants
         const float MAX_SPIKING_ANGLE_rads = 0.2;
         const float MAX_RDP_DEVIATION_mm  =  70;
-        const uint NUM_STEPS = 15;
+        const uint NUM_STEPS = 12;
         constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
         constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
 
@@ -111,6 +111,7 @@ class SpecificWorker : public GenericWorker
 
         // path
         void draw_path(const std::vector<QPointF> &path);
+        std::vector<QPointF> compute_path();
         bool atTarget = true;
 
         // Grid
@@ -126,6 +127,7 @@ class SpecificWorker : public GenericWorker
         using Point = std::pair<float, float>;  //only for RDP, change to QPointF
         using Lines = std::vector<std::tuple<float, float, float>>;
         using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
+
 
         Obstacles compute_laser_partitions(QPolygonF  &laser_poly);
         Obstacles compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles, const QPolygonF &laser_poly);
@@ -174,8 +176,8 @@ class SpecificWorker : public GenericWorker
         };
         std::vector<ObsData> obs_contraints;
         GRBVar *sin_cos_vars;
-        void initialize_model(const StateVector &target, const Obstacles &obstacles);
-        void optimize(const StateVector &target_state,  const Obstacles &obstacles);
+        void initialize_model(const StateVector &target);
+        void optimize(const StateVector &target_state,  const Obstacles &obstacles, const std::vector<QPointF> &path);
         Callback *callback;
 
         // Draw
@@ -187,7 +189,7 @@ class SpecificWorker : public GenericWorker
         QGraphicsEllipseItem *target_draw = nullptr;
         void draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t);
         void draw_laser(const QPolygonF &poly);
-        void draw(const ControlVector &control, float pos_error, float rot_error, float time_elapsed);
+        void draw_signals(const ControlVector &control, float pos_error, float rot_error, float time_elapsed);
         void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
         int cont=0;
 

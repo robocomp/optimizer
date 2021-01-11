@@ -74,15 +74,17 @@ void SpecificWorker::initialize(int period)
     map_obstacles = read_map_obstacles();
 
     // model
+    read_base();
     auto laser_poly = read_laser();
     auto laser_free_regions = compute_laser_partitions(laser_poly);
     auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly);
     std::vector<tuple<Lines, QPolygonF>> free_regions;
-    free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
+    //free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
     free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
-    initialize_model(StateVector(0,0,0), free_regions);
+    draw_partitions(free_regions, QColor("Magenta"),false);
+    initialize_model(StateVector(0,0,0));
 
-	this->Period = period;
+	this->Period = 0;
 	if(this->startup_check_flag)
 		this->startup_check();
 	else
@@ -91,13 +93,15 @@ void SpecificWorker::initialize(int period)
 
 void SpecificWorker::compute()
 {
+    static std::vector<QPointF> path(NUM_STEPS, QPoint(0,0));
+
     auto bState = read_base();
     auto laser_poly = read_laser();  // returns poly in robot coordinates
     //draw_laser(laser_poly);
     //auto laser_free_regions = compute_laser_partitions(laser_poly);
     auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly);
     std::vector<tuple<Lines, QPolygonF>> free_regions;
- //   free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
+    // free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
     free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
     draw_partitions(free_regions, QColor("Magenta"),false);
 
@@ -122,7 +126,7 @@ void SpecificWorker::compute()
         else
         {
             auto t = std::chrono::high_resolution_clock::now();
-            optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions);
+            optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions, path);
             auto now = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( now - t ).count();
             std::cout << "optimize " << duration << " ms" << std::endl;
@@ -138,19 +142,21 @@ void SpecificWorker::compute()
                 float x = control_vars[0].get(GRB_DoubleAttr_X);
                 float y = control_vars[1].get(GRB_DoubleAttr_X);
                 float a = control_vars[2].get(GRB_DoubleAttr_X);
-                //qDebug()<<"CONTROL"<<x<<y<<a;
+                path.clear();
+                path = compute_path();
                 omnirobot_proxy->setSpeedBase(x, y, a);
+
                 // draw
-                draw(ControlVector(x, y, a), pos_error, rot_error, duration);
+                draw_signals(ControlVector(x, y, a), pos_error, rot_error, duration);
+                draw_path(path);
             }
         }
     }
-
 }
 
 ///////////////////////////////////////////// OPTIMIZER /////////////////////////////////////////////////////////
 
-void SpecificWorker::initialize_model(const StateVector &target, const Obstacles &obstacles)
+void SpecificWorker::initialize_model(const StateVector &target)
 {
     // Create environment
     //env.set("LogFile", "path_optimization.log");
@@ -158,12 +164,7 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     // Create initial model
     env.set(GRB_IntParam_OutputFlag, 0);
     model = new GRBModel(env);
-
     model->set(GRB_StringAttr_ModelName, "path_optimization");
-    int numvars = model->get(GRB_IntAttr_NumVars);
-    auto vars = model->getVars();
-    callback = new Callback(numvars, vars);
-    model->setCallback(callback);
     model_vars = model->addVars((STATE_DIM + CONTROL_DIM) * NUM_STEPS, GRB_CONTINUOUS);
     state_vars = &(model_vars[0]);
     control_vars = &(model_vars[STATE_DIM * NUM_STEPS]);
@@ -244,14 +245,20 @@ void SpecificWorker::initialize_model(const StateVector &target, const Obstacles
     //for(auto &&e : iter::chunked(iter::slice(control_vars, 0, NUM_STEPS-1), 3))
     for (uint e = 0; e < NUM_STEPS - 1; e++)
     {
-        obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.002;     // compensation factors as de R matrix
-        obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.002;
-        obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];
+        this->obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.002;     // compensation factors as de R matrix
+        this->obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.002;
+        this->obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];
     }
     model->update();
+    //model->set(GRB_DoubleParam_TimeLimit, 1.0);
+
+    //int numvars = model->get(GRB_IntAttr_NumVars);
+    //auto vars = model->getVars();
+    //callback = new Callback(numvars, vars);
+    //model->setCallback(callback);
 }
 
-void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &obstacles)
+void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &obstacles, const std::vector<QPointF> &path)
 {
     //qInfo() << "states " << obstacles.size();
     try
@@ -274,7 +281,7 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         // add new obstacle restrictions
         const float DW = 450.f, DL = 300.f;
         static std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
-        obs_contraints.resize((NUM_STEPS-2) * desp.size());
+        obs_contraints.resize((NUM_STEPS-2) * desp.size()); // avoids restriction over state[0]
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
         {
             auto &[dx, dy] = d;
@@ -316,6 +323,15 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
                 obs_contraints[(e-1)*desp.size()+i] = obs_data;
             }
         }  // All points of the robot are finished
+
+        // Warm start
+        for (uint e = 1; e < NUM_STEPS-1; e++)
+        {
+            state_vars[e * STATE_DIM].set(GRB_DoubleAttr_Start, path[e].x());
+            state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_Start, path[e].y());
+            //state_vars[e * STATE_DIM + 2].set(GRB_DoubleAttr_Start, path[e].z());
+        }
+
         model->update();
         model->setObjective(obj, GRB_MINIMIZE);
         model->optimize();
@@ -696,7 +712,7 @@ void SpecificWorker::draw_target(const RoboCompGenericBase::TBaseState &bState, 
     timeGraph->data()->clear();
 }
 
-void SpecificWorker::draw(const ControlVector &control, float pos_error, float rot_error, float time_elapsed)
+std::vector<QPointF> SpecificWorker::compute_path()
 {
     std::vector<QPointF> path(NUM_STEPS);
     std::generate(path.begin(), path.end(), [i=innerModel, s=state_vars, d=STATE_DIM, e=0]() mutable
@@ -705,7 +721,10 @@ void SpecificWorker::draw(const ControlVector &control, float pos_error, float r
         e++;
         return QPointF(p.x(), p.z());
     });
-    draw_path(path);
+    return path;
+}
+void SpecificWorker::draw_signals(const ControlVector &control, float pos_error, float rot_error, float time_elapsed)
+{
     xGraph->addData(cont, control.x());
     yGraph->addData(cont, control.y());
     wGraph->addData(cont, control[2]*300);
