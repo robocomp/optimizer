@@ -175,13 +175,13 @@ void SpecificWorker::initialize_model(const StateVector &target)
         ostringstream v_name_x, v_name_y, v_name_ang;
         v_name_x << "x" << e;
         state_vars[e * STATE_DIM].set(GRB_StringAttr_VarName, v_name_x.str());
-        state_vars[e * STATE_DIM].set(GRB_DoubleAttr_LB, -10000);
-        state_vars[e * STATE_DIM].set(GRB_DoubleAttr_UB, +10000);
+        state_vars[e * STATE_DIM].set(GRB_DoubleAttr_LB, -5000);
+        state_vars[e * STATE_DIM].set(GRB_DoubleAttr_UB, +5000);
         //state_vars[e*2].set(GRB_DoubleAttr_Start, path[e].x());
         v_name_y << "y" << e;
         state_vars[e * STATE_DIM + 1].set(GRB_StringAttr_VarName, v_name_y.str());
-        state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_LB, -10000);
-        state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_UB, +10000);
+        state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_LB, -5000);
+        state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_UB, +5000);
         v_name_ang << "a" << e;
         state_vars[e * STATE_DIM + 2].set(GRB_StringAttr_VarName, v_name_ang.str());
         state_vars[e * STATE_DIM + 2].set(GRB_DoubleAttr_LB, -M_PI);
@@ -194,13 +194,13 @@ void SpecificWorker::initialize_model(const StateVector &target)
         ostringstream v_name_u, v_name_v, v_name_w;
         v_name_u << "u" << e;
         control_vars[e * CONTROL_DIM].set(GRB_StringAttr_VarName, v_name_u.str());
-        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_LB, -10000);
-        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_UB, +10000);
+        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_LB, -1000);
+        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_UB, +1000);
 
         v_name_v << "v" << e;
         control_vars[e * CONTROL_DIM + 1].set(GRB_StringAttr_VarName, v_name_v.str());
-        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_LB, -2000);
-        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_UB, +2000);
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_LB, -1000);
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_UB, +1000);
 
         v_name_w << "w" << e;
         control_vars[e * CONTROL_DIM + 2].set(GRB_StringAttr_VarName, v_name_w.str());
@@ -216,7 +216,7 @@ void SpecificWorker::initialize_model(const StateVector &target)
     // final state should be equal to target
     model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target.x(), "c1x");
     model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target.y(), "c1y");
-    model->addConstr(state_vars[(NUM_STEPS / 2 - 1) * STATE_DIM + 2] == target[2], "c1a");
+    model->addConstr(state_vars[(NUM_STEPS / 4) * STATE_DIM + 2] == target[2], "c1a");
 
     // model dynamics constraint x = Ax + Bu
     for (uint e = 0; e < NUM_STEPS - 1; e++)
@@ -263,6 +263,7 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
     //qInfo() << "states " << obstacles.size();
     try
     {
+        // remove endpoint restrictions
         model->remove(model->getConstrByName("c1x"));
         model->remove(model->getConstrByName("c1y"));
         model->remove(model->getConstrByName("c1a"));
@@ -273,13 +274,13 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         obs_contraints.clear();
         model->update();
 
-        // target state restriction
+        // add target state restriction
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target_state.x(), "c1x");
         model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target_state.y(), "c1y");
         model->addConstr(state_vars[(NUM_STEPS/2 - 1) * STATE_DIM + 2] == target_state[2], "c1a");
         
         // add new obstacle restrictions
-        const float DW = 450.f, DL = 300.f;
+        const float DW = 350.f, DL = 300.f;
         static std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size()); // avoids restriction over state[0]
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
@@ -593,15 +594,15 @@ void SpecificWorker::stop_robot()
 std::vector<QPolygonF> SpecificWorker::read_map_obstacles()
 {
     std::vector<QPolygonF> map_obstacles;
-    QPolygonF p1(QRectF( QPointF(-1435-1000, 800-300), QSizeF(2000, 600)));
+    QPolygonF p1(QRectF( QPointF(-1435-1000, 800-300), QSizeF(2050, 600)));
     p1.pop_back();  // remove last point because last point is the same as one
     map_obstacles.emplace_back(p1);
     QPolygonF p2(QRectF( QPointF(1458-1000, 800-300), QSizeF(2000, 600)));
     p2.pop_back();
     map_obstacles.emplace_back(p2);
-    QPolygonF p3(QRectF( QPointF(90-300, -1175-300), QSizeF(600, 600)));
-    p3.pop_back();
-    map_obstacles.emplace_back(p3);
+//    QPolygonF p3(QRectF( QPointF(90-300, -1175-300), QSizeF(600, 600)));
+//    p3.pop_back();
+//    map_obstacles.emplace_back(p3);
     return map_obstacles;
 }
 ///////////////////////////////////// DRAWING /////////////////////////////////////////////////////////////////

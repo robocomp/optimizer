@@ -91,7 +91,7 @@ class SpecificWorker : public GenericWorker
         // constants
         const float MAX_SPIKING_ANGLE_rads = 0.2;
         const float MAX_RDP_DEVIATION_mm  =  70;
-        const uint NUM_STEPS = 12;
+        const uint NUM_STEPS = 13;
         constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
         constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
 
