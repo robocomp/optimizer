@@ -127,10 +127,11 @@ class SpecificWorker : public GenericWorker
         using Point = std::pair<float, float>;  //only for RDP, change to QPointF
         using Lines = std::vector<std::tuple<float, float, float>>;
         using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
+        std::vector<tuple<Lines, QPolygonF>> world_free_regions;
 
 
         Obstacles compute_laser_partitions(QPolygonF  &laser_poly);
-        Obstacles compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles, const QPolygonF &laser_poly);
+        Obstacles compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles, const QPolygonF &laser_poly, QGraphicsItem* robot_polygon);
         void ramer_douglas_peucker(const vector<Point> &pointList, double epsilon, vector<Point> &out);
 
         // Model and optimizations

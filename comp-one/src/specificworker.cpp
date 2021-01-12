@@ -76,12 +76,11 @@ void SpecificWorker::initialize(int period)
     // model
     read_base();
     auto laser_poly = read_laser();
-    auto laser_free_regions = compute_laser_partitions(laser_poly);
-    auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly);
-    std::vector<tuple<Lines, QPolygonF>> free_regions;
-    //free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
-    free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
-    draw_partitions(free_regions, QColor("Magenta"),false);
+    // auto laser_free_regions = compute_laser_partitions(laser_poly);
+    // auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly, robot_polygon); // in robot coordinates
+    // free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
+    // world_free_regions.insert(world_free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
+    // draw_partitions(world_free_regions, QColor("Magenta"),false);
     initialize_model(StateVector(0,0,0));
 
 	this->Period = 0;
@@ -99,7 +98,7 @@ void SpecificWorker::compute()
     auto laser_poly = read_laser();  // returns poly in robot coordinates
     //draw_laser(laser_poly);
     //auto laser_free_regions = compute_laser_partitions(laser_poly);
-    auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly);
+    auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly, robot_polygon);
     std::vector<tuple<Lines, QPolygonF>> free_regions;
     // free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
     free_regions.insert(free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
@@ -400,7 +399,8 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &l
 }
 
 /// compute covex polygons outside the laser field
-SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles, const QPolygonF &laser_poly)
+SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles,
+                                                                      const QPolygonF &laser_poly, QGraphicsItem* robot_polygon)
 {
     // get the complete external contour
     QPolygonF pe = robot_polygon->mapFromScene(QPolygonF(QRectF(dim.HMIN, dim.VMIN, dim.WIDTH, dim.HEIGHT)));  // world rectangle to robot coordinates
@@ -594,15 +594,15 @@ void SpecificWorker::stop_robot()
 std::vector<QPolygonF> SpecificWorker::read_map_obstacles()
 {
     std::vector<QPolygonF> map_obstacles;
-    QPolygonF p1(QRectF( QPointF(-1435-1000, 800-300), QSizeF(2050, 600)));
-    p1.pop_back();  // remove last point because last point is the same as one
-    map_obstacles.emplace_back(p1);
-    QPolygonF p2(QRectF( QPointF(1458-1000, 800-300), QSizeF(2000, 600)));
-    p2.pop_back();
-    map_obstacles.emplace_back(p2);
-//    QPolygonF p3(QRectF( QPointF(90-300, -1175-300), QSizeF(600, 600)));
-//    p3.pop_back();
-//    map_obstacles.emplace_back(p3);
+//    QPolygonF p1(QRectF( QPointF(-1435-1000, 800-300), QSizeF(2050, 600)));
+//    p1.pop_back();  // remove last point because last point is the same as one
+//    map_obstacles.emplace_back(p1);
+//    QPolygonF p2(QRectF( QPointF(1458-1000, 800-300), QSizeF(2000, 600)));
+//    p2.pop_back();
+//    map_obstacles.emplace_back(p2);
+    QPolygonF p3(QRectF( QPointF(90-300, -1175-300), QSizeF(600, 600)));
+    p3.pop_back();
+    map_obstacles.emplace_back(p3);
     return map_obstacles;
 }
 ///////////////////////////////////// DRAWING /////////////////////////////////////////////////////////////////
