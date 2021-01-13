@@ -215,7 +215,7 @@ void SpecificWorker::initialize_model(const StateVector &target)
     // final state should be equal to target
     model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target.x(), "c1x");
     model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target.y(), "c1y");
-    model->addConstr(state_vars[(NUM_STEPS / 4) * STATE_DIM + 2] == target[2], "c1a");
+    model->addConstr(state_vars[(NUM_STEPS / 3) * STATE_DIM + 2] == target[2], "c1a");
 
     // model dynamics constraint x = Ax + Bu
     for (uint e = 0; e < NUM_STEPS - 1; e++)
@@ -279,8 +279,8 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         model->addConstr(state_vars[(NUM_STEPS/2 - 1) * STATE_DIM + 2] == target_state[2], "c1a");
         
         // add new obstacle restrictions
-        const float DW = 350.f, DL = 300.f;
-        static std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
+        const float DW = 250.f, DL = 250.f;
+        static std::vector<std::tuple<float,float>> desp = {{0, 0}, {-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size()); // avoids restriction over state[0]
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
         {
@@ -594,12 +594,12 @@ void SpecificWorker::stop_robot()
 std::vector<QPolygonF> SpecificWorker::read_map_obstacles()
 {
     std::vector<QPolygonF> map_obstacles;
-//    QPolygonF p1(QRectF( QPointF(-1435-1000, 800-300), QSizeF(2050, 600)));
-//    p1.pop_back();  // remove last point because last point is the same as one
-//    map_obstacles.emplace_back(p1);
-//    QPolygonF p2(QRectF( QPointF(1458-1000, 800-300), QSizeF(2000, 600)));
-//    p2.pop_back();
-//    map_obstacles.emplace_back(p2);
+    QPolygonF p1(QRectF( QPointF(-1490-1000, 800-300), QSizeF(2100, 600)));
+    p1.pop_back();  // remove last point because last point is the same as the firts one
+    map_obstacles.emplace_back(p1);
+    QPolygonF p2(QRectF( QPointF(1490-1000, 800-300), QSizeF(2000, 600)));
+    p2.pop_back();
+    map_obstacles.emplace_back(p2);
     QPolygonF p3(QRectF( QPointF(90-300, -1175-300), QSizeF(600, 600)));
     p3.pop_back();
     map_obstacles.emplace_back(p3);
@@ -753,11 +753,11 @@ void SpecificWorker::draw_partitions(const Obstacles &obstacles, const QColor &c
             inside = inside and C > 0; // since ABC were computed in the robot's coordinate frame
         }
         if (inside)
-            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color_inside, 30), QBrush(color_inside)));
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color_inside, 0), QBrush(color_inside)));
         else
         {
             //color.setRgb(qrand() % 255, qrand() % 255, qrand() % 255);
-            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 30), QBrush(color_outside)));
+            polys_ptr.push_back(scene.addPolygon(std::get<QPolygonF>(obs), QPen(color, 0), QBrush(color_outside)));
         }
     }
     if(print)
