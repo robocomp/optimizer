@@ -193,13 +193,13 @@ void SpecificWorker::initialize_model(const StateVector &target)
         ostringstream v_name_u, v_name_v, v_name_w;
         v_name_u << "u" << e;
         control_vars[e * CONTROL_DIM].set(GRB_StringAttr_VarName, v_name_u.str());
-        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_LB, -1000);
-        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_UB, +1000);
+        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_LB, -100);
+        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_UB, +100);
 
         v_name_v << "v" << e;
         control_vars[e * CONTROL_DIM + 1].set(GRB_StringAttr_VarName, v_name_v.str());
-        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_LB, -1000);
-        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_UB, +1000);
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_LB, -100);
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_UB, +100);
 
         v_name_w << "w" << e;
         control_vars[e * CONTROL_DIM + 2].set(GRB_StringAttr_VarName, v_name_w.str());
@@ -213,8 +213,8 @@ void SpecificWorker::initialize_model(const StateVector &target)
     model->addConstr(state_vars[2] == 0, "c0a");
 
     // final state should be equal to target
-    model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target.x(), "c1x");
-    model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target.y(), "c1y");
+    // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target.x(), "c1x");
+    // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target.y(), "c1y");
     model->addConstr(state_vars[(NUM_STEPS / 4) * STATE_DIM + 2] == target[2], "c1a");
 
     // model dynamics constraint x = Ax + Bu
@@ -263,8 +263,8 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
     try
     {
         // remove endpoint restrictions
-        model->remove(model->getConstrByName("c1x"));
-        model->remove(model->getConstrByName("c1y"));
+        // model->remove(model->getConstrByName("c1x"));
+        // model->remove(model->getConstrByName("c1y"));
         model->remove(model->getConstrByName("c1a"));
 
         // remove all obstacle restrictions
@@ -274,12 +274,26 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         model->update();
 
         // add target state restriction
-        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target_state.x(), "c1x");
-        model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target_state.y(), "c1y");
+        // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target_state.x(), "c1x");
+        // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target_state.y(), "c1y");
         model->addConstr(state_vars[(NUM_STEPS/2 - 1) * STATE_DIM + 2] == target_state[2], "c1a");
+        this->obj = GRBQuadExpr();
+        for (uint e = 0; e < NUM_STEPS ; e++)
+        {
+            // this->obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] ;     // compensation factors as de R matrix
+            // this->obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] ;
+            this->obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];
+            this->obj += (state_vars[e * STATE_DIM] - target_state.x())*(state_vars[e * STATE_DIM] - target_state.x());
+            this->obj += (state_vars[e * STATE_DIM + 1] - target_state.y())*(state_vars[e * STATE_DIM + 1] - target_state.y());
+
+        }
+        // this->obj += (state_vars[(NUM_STEPS - 1) * STATE_DIM] - target_state.x())*(state_vars[(NUM_STEPS - 1) * STATE_DIM] - target_state.x());
+        // this->obj += (state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] - target_state.y())*(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] - target_state.y());
+
+
         
         // add new obstacle restrictions
-        const float DW = 350.f, DL = 300.f;
+        const float DW = 280.f, DL = 280.f;
         static std::vector<std::tuple<float,float>> desp = {{-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size()); // avoids restriction over state[0]
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
@@ -325,12 +339,14 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         }  // All points of the robot are finished
 
         // Warm start
-        for (uint e = 1; e < NUM_STEPS-1; e++)
-        {
-            state_vars[e * STATE_DIM].set(GRB_DoubleAttr_Start, path[e].x());
-            state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_Start, path[e].y());
-            //state_vars[e * STATE_DIM + 2].set(GRB_DoubleAttr_Start, path[e].z());
-        }
+        // for (uint e = 0; e < NUM_STEPS-1; e++)
+        // {
+        //     state_vars[e * STATE_DIM].set(GRB_DoubleAttr_Start, path[e].x());
+        //     state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_Start, path[e].y());
+        //     control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_Start, path[e+1].x()-path[e].x());
+        //     control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_Start, path[e+1].y()-path[e].y());
+        //     //state_vars[e * STATE_DIM + 2].set(GRB_DoubleAttr_Start, path[e].z());
+        // }
 
         model->update();
         model->setObjective(obj, GRB_MINIMIZE);
@@ -478,6 +494,8 @@ SpecificWorker::Obstacles SpecificWorker::compute_external_partitions(Grid<>::Di
             float x2 = poly_res.GetPoint((++k) % num_points).x;
             float y2 = poly_res.GetPoint((k) % num_points).y;
             float norm = sqrt(pow(y1-y2, 2) + pow(x2-x1, 2));
+            //qDebug()<<x1<<y1<<x2<<y2;
+            //qDebug()<<(y1 - y2)/norm<< (x2 - x1)/norm<< -((y1 - y2)*x1 + (x2 - x1)*y1)/norm;
             return std::make_tuple((y1 - y2)/norm, (x2 - x1)/norm, -((y1 - y2)*x1 + (x2 - x1)*y1)/norm);
         });
         obstacles.emplace_back(std::make_tuple(line, poly_draw));
