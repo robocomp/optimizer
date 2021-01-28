@@ -57,6 +57,11 @@ class SpecificWorker : public GenericWorker
         ~SpecificWorker();
         bool setParams(RoboCompCommonBehavior::ParameterList params);
 
+        struct RobotPose
+        {
+            QVector2D pos;
+            float ang;
+        };
 
     public slots:
         void compute();
@@ -91,7 +96,10 @@ class SpecificWorker : public GenericWorker
         // constants
         const float MAX_SPIKING_ANGLE_rads = 0.2;
         const float MAX_RDP_DEVIATION_mm  =  70;
-        const uint NUM_STEPS = 18;
+        const uint NUM_STEPS = 16;
+        float MAX_ADV_SPEED = 1000;
+        float MAX_ROT_SPEED = 1;
+        float MAX_SIDE_SPEED = 500;
 
         constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
         constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
@@ -99,12 +107,15 @@ class SpecificWorker : public GenericWorker
         // general
         std::shared_ptr < InnerModel > innerModel;
         bool startup_check_flag;
-        QPolygonF read_laser();
+        std::tuple<QPolygonF, RoboCompLaser::TLaserData> read_laser();
         RoboCompGenericBase::TBaseState read_base();
 
         // robot
-        const float ROBOT_LENGTH = 400;
+        const float ROBOT_LENGTH = 505;
+        const float ROBOT_WIDTH = 375;
         void stop_robot();
+        QPolygonF robot_polygon_extended;
+        int OFFSET = 100;  // virtual bumper
 
         // target
         QPointF target;
@@ -130,6 +141,14 @@ class SpecificWorker : public GenericWorker
         using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
         std::vector<tuple<Lines, QPolygonF>> world_free_regions;
 
+        //controller
+        float exponentialFunction(float value, float xValue, float yValue, float min);
+        float rewrapAngleRestricted(const float angle);
+        void local_controller(const std::vector<QPointF> &path, const RoboCompLaser::TLaserData &laser_data, const QPointF &robot, const QPointF &target);
+        void local_controller(float side_vel, float adv_vel, float rot_vel, const RoboCompLaser::TLaserData &laser_data);
+
+        // threads
+        std::thread opt_thread;
 
         Obstacles compute_laser_partitions(QPolygonF  &laser_poly);
         Obstacles compute_external_partitions(Grid<>::Dimensions dim, const std::vector<QPolygonF> &map_obstacles, const QPolygonF &laser_poly, QGraphicsItem* robot_polygon);

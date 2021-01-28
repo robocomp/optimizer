@@ -23,6 +23,7 @@
 #include <cppitertools/sliding_window.hpp>
 #include <cppitertools/reversed.hpp>
 #include <cppitertools/filter.hpp>
+#include <chrono>
 
 using namespace std::literals;
 
@@ -76,14 +77,13 @@ void SpecificWorker::initialize(int period)
     // model
     read_base();
     auto laser_poly = read_laser();
-    // auto laser_free_regions = compute_laser_partitions(laser_poly);
-    // auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly, robot_polygon); // in robot coordinates
-    // free_regions.insert(free_regions.begin(), laser_free_regions.begin(), laser_free_regions.end());
-    // world_free_regions.insert(world_free_regions.begin(), external_free_regions.begin(), external_free_regions.end());
-    // draw_partitions(world_free_regions, QColor("Magenta"),false);
     initialize_model(StateVector(0,0,0));
+    robot_polygon_extended  << QPointF(-ROBOT_WIDTH/2-OFFSET, -ROBOT_LENGTH/2-OFFSET)
+                            << QPointF(-ROBOT_WIDTH/2+OFFSET, ROBOT_LENGTH/2+OFFSET)
+                            << QPointF(-ROBOT_WIDTH/2+OFFSET, ROBOT_LENGTH/2+OFFSET)
+                            << QPointF(-ROBOT_WIDTH/2-OFFSET, -ROBOT_LENGTH/2-OFFSET);
 
-	this->Period = 0;
+    this->Period = 0;
 	if(this->startup_check_flag)
 		this->startup_check();
 	else
@@ -93,9 +93,13 @@ void SpecificWorker::initialize(int period)
 void SpecificWorker::compute()
 {
     static std::vector<QPointF> path(NUM_STEPS, QPoint(0,0));
+    static bool solution_achieved = true;
+    static std::chrono::time_point<std::chrono::high_resolution_clock> t;
+    static std::future<void> future_result;
+
 
     auto bState = read_base();
-    auto laser_poly = read_laser();  // returns poly in robot coordinates
+    auto [laser_poly, laser_data] = read_laser();  // returns poly in robot coordinates
     //draw_laser(laser_poly);
     //auto laser_free_regions = compute_laser_partitions(laser_poly);
     auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly, robot_polygon);
@@ -124,34 +128,113 @@ void SpecificWorker::compute()
             stop_robot();
         else
         {
-            auto t = std::chrono::high_resolution_clock::now();
-            optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions, path);
-            auto now = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>( now - t ).count();
-            std::cout << "optimize " << duration << " ms" << std::endl;
-
-            int status = model->get(GRB_IntAttr_Status);
-            if(status != GRB_OPTIMAL)
+            if(solution_achieved)
             {
-                omnirobot_proxy->setSpeedBase(0, 0, 0);
-                qInfo() << __FUNCTION__ << "Result status:" << status;
+                //qInfo() << __FUNCTION__ << "new call to async";
+                t = std::chrono::high_resolution_clock::now();
+                future_result = std::async(std::launch::async, &SpecificWorker::optimize,
+                                           this, StateVector(rtarget.x(), rtarget.z(), target_ang),
+                                           free_regions, path);
+                solution_achieved = false;
             }
-            else
+            if(future_result.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready)
+            {   // move the robot along previous path or stop it if none
+                if( not path.empty() )
+                {
+                    local_controller(path, laser_data, QPointF(bState.x, bState.z), QPointF(rtarget.x(), rtarget.z()));
+                    //omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
+                }
+                else
+                {
+                    omnirobot_proxy->setSpeedBase(0, 0, 0);
+                    qInfo() << __FUNCTION__ << "Not path ready yet";
+                }
+            }
+            else //move with new controller
             {
-                float x = control_vars[0].get(GRB_DoubleAttr_X);
-                float y = control_vars[1].get(GRB_DoubleAttr_X);
-                float a = control_vars[2].get(GRB_DoubleAttr_X);
-                path.clear();
-                path = compute_path();
-                omnirobot_proxy->setSpeedBase(x, y, a);
-
-                // draw
-                draw_signals(ControlVector(x, y, a), pos_error, rot_error, duration);
-                draw_path(path);
+                auto now = std::chrono::high_resolution_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
+                std::cout << __FUNCTION__ << " Completed in " << duration << " ms" << std::endl;
+                //optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions, path);
+                solution_achieved = true;
+                int status = model->get(GRB_IntAttr_Status);
+                if (status != GRB_OPTIMAL)
+                {
+                    //omnirobot_proxy->setSpeedBase(0, 0, 0);
+                    local_controller(path, laser_data, QPointF(bState.x, bState.z), QPointF(rtarget.x(), rtarget.z()));
+                    qInfo() << __FUNCTION__ << "Result status:" << status;
+                } else
+                {
+                    float x = control_vars[0].get(GRB_DoubleAttr_X);
+                    float y = control_vars[1].get(GRB_DoubleAttr_X);
+                    float a = control_vars[2].get(GRB_DoubleAttr_X);
+                    path.clear();
+                    path = compute_path();
+                    local_controller(y, x, a, laser_data);
+                    //omnirobot_proxy->setSpeedBase(x, y, a);
+                    qInfo() << "Control " << x << y << a;
+                    // draw
+                    auto now = std::chrono::high_resolution_clock::now();
+                    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
+                    draw_signals(ControlVector(x, y, a), pos_error, rot_error, duration);
+                }
             }
+            draw_path(path);
         }
     }
 }
+
+void SpecificWorker::local_controller( const std::vector<QPointF> &path, const RoboCompLaser::TLaserData &laser_data,
+                                                                  const QPointF &robot, const QPointF &target)
+{
+    qDebug() << "Controller - "<< __FUNCTION__;
+    if(path.size() < 2)
+        return;
+
+    // compute closest point to the robot (CPR)
+    auto min = std::ranges::min_element(path, [r=QVector2D(robot)](auto &a, auto &b){ return (r-QVector2D(a)).lengthSquared() < (r-QVector2D(b)).lengthSquared();});
+    QPointF current_point = *min;
+
+    // now y is forward direction and x is pointing rightwards
+    float adv_vel = 0.f, rot_vel = 0.f;
+
+    //robot nose
+    QVec nose = innerModel->transform("world", QVec::vec3(0., 0., ROBOT_LENGTH), "robot");
+    QPointF robot_nose(nose.x(), nose.z());
+
+    // Compute euclidean distance to target
+    float euc_dist_to_target = QVector2D(robot - target).length();
+
+    /// Compute rotational speed
+    QLineF robot_to_nose(robot, robot_nose);
+    float angle = rewrapAngleRestricted(qDegreesToRadians(robot_to_nose.angleTo(QLineF(robot_nose, current_point))));
+    rot_vel = std::clamp(angle, -MAX_ROT_SPEED, MAX_ROT_SPEED);
+
+    /// Compute advance speed
+    std::min(adv_vel = MAX_ADV_SPEED * exponentialFunction(rot_vel, 1, 0.1, 0), euc_dist_to_target);
+
+    local_controller(adv_vel, 0, rot_vel, laser_data);
+}
+
+void SpecificWorker::local_controller(float adv_vel, float side_vel, float rot_vel, const RoboCompLaser::TLaserData &laser_data)
+{
+    /// Compute bumper-away speed
+    QVector2D total{0, 0};
+    for (const auto &l : laser_data)
+    {
+        QPointF lp(l.dist*sin(l.angle), l.dist*cos(l.angle));
+        if(robot_polygon_extended.containsPoint(lp, Qt::OddEvenFill))
+            total = total - QVector2D(lp);
+
+    }
+    side_vel = std::clamp( float(total.x()/10. + side_vel), -MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+    try
+    {
+        omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
+    }
+    catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;};
+}
+
 
 ///////////////////////////////////////////// OPTIMIZER /////////////////////////////////////////////////////////
 
@@ -339,14 +422,14 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         }  // All points of the robot are finished
 
         // Warm start
-        // for (uint e = 0; e < NUM_STEPS-1; e++)
-        // {
-        //     state_vars[e * STATE_DIM].set(GRB_DoubleAttr_Start, path[e].x());
-        //     state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_Start, path[e].y());
-        //     control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_Start, path[e+1].x()-path[e].x());
-        //     control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_Start, path[e+1].y()-path[e].y());
-        //     //state_vars[e * STATE_DIM + 2].set(GRB_DoubleAttr_Start, path[e].z());
-        // }
+         for (uint e = 0; e < NUM_STEPS-1; e++)
+         {
+             state_vars[e * STATE_DIM].set(GRB_DoubleAttr_Start, path[e].x());
+             state_vars[e * STATE_DIM + 1].set(GRB_DoubleAttr_Start, path[e].y());
+             //control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_Start, path[e+1].x()-path[e].x());
+             //control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_Start, path[e+1].y()-path[e].y());
+             //state_vars[e * STATE_DIM + 2].set(GRB_DoubleAttr_Start, path[e].z());
+         }
 
         model->update();
         model->setObjective(obj, GRB_MINIMIZE);
@@ -563,12 +646,13 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     }
     return bState;
 }
-QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
+std::tuple<QPolygonF, RoboCompLaser::TLaserData> SpecificWorker::read_laser()   //returns points in robot's CoorSystem
 {
     QPolygonF laser_poly;
+    RoboCompLaser::TLaserData ldata;
     try
     {
-        auto ldata = laser_proxy->getLaserData();
+        ldata = laser_proxy->getLaserData();
 
         // Simplify laser contour with Ramer-Douglas-Peucker
         std::vector<Point> plist(ldata.size());
@@ -591,7 +675,7 @@ QPolygonF SpecificWorker::read_laser()   //returns points in robot's CoorSystem
     catch(const Ice::Exception &e)
     { std::cout << "Error reading from Laser" << e << std::endl;}
     laser_poly.pop_back();
-    return laser_poly;  // robot coordinates
+    return std::make_tuple(laser_poly, ldata);  // robot coordinates
 }
 void SpecificWorker::fill_grid(const QPolygonF &laser_poly)
 {
@@ -662,15 +746,17 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
 
     //robot
     QPolygonF poly2;
-    float size = ROBOT_LENGTH / 2.f;
-    poly2 << QPoint(-size, -size)
-          << QPoint(-size, size)
-          << QPoint(-size / 3, size * 1.6)
-          << QPoint(size / 3, size * 1.6)
-          << QPoint(size, size)
-          << QPoint(size, -size);
+    poly2  << QPointF(-ROBOT_WIDTH/2, -ROBOT_LENGTH/2)
+           << QPointF(-ROBOT_WIDTH/2, ROBOT_LENGTH/2)
+           << QPointF(ROBOT_WIDTH/2, ROBOT_LENGTH/2)
+           << QPointF(ROBOT_WIDTH/2, -ROBOT_LENGTH/2);
+    QPolygonF marca(QRectF(-25,-25, 50, 50));
+
     QColor rc("DarkRed"); rc.setAlpha(80);
     robot_polygon = scene.addPolygon(poly2, QPen(QColor("DarkRed")), QBrush(rc));
+    auto marca_polygon = scene.addPolygon(marca, QPen(QColor("White")), QBrush("White"));
+    marca_polygon->setParentItem(robot_polygon);
+    marca_polygon->setPos(QPointF(0, ROBOT_LENGTH/2 - 40));
     robot_polygon->setZValue(5);
     try
     {
@@ -679,8 +765,8 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
         robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
     }
-    catch(const Ice::Exception &e){};;
-
+    catch(const Ice::Exception &e){std::cout << e.what() << std::endl;};
+    
     connect(splitter, &QSplitter::splitterMoved, [this](int pos, int index)
         {  custom_plot.resize(signal_frame->size()); graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio); });
 }
@@ -788,6 +874,25 @@ void SpecificWorker::draw_partitions(const Obstacles &obstacles, const QColor &c
             qInfo() << "-----------------------";
         }
     }
+}
+
+float SpecificWorker::exponentialFunction(float value, float xValue, float yValue, float min)
+{
+    if (yValue <= 0)
+        return 1.f;
+    float landa = -fabs(xValue) / log(yValue);
+    float res = exp(-fabs(value) / landa);
+    return std::max(res, min);
+}
+
+float SpecificWorker::rewrapAngleRestricted(const float angle)
+{
+    if (angle > M_PI)
+        return angle - M_PI * 2;
+    else if (angle < -M_PI)
+        return angle + M_PI * 2;
+    else
+        return angle;
 }
 
 ////////////////////////////////////// TESTING /////////////////////////////////////////////////////////

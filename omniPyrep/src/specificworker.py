@@ -57,7 +57,7 @@ class SpecificWorker(GenericWorker):
         
         #self.robot = Viriato()
         self.robot = YouBot()
-        self.robot_object = Object("youBot")
+        self.robot_object = Shape("youBot")
 
         #self.ViriatoBase_WheelRadius = 76.2  #mm real robot
         self.ViriatoBase_WheelRadius = 44  # mm coppelia
