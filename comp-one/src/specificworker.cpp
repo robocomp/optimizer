@@ -68,6 +68,11 @@ void SpecificWorker::initialize(int period)
     //grid.initialize(&scene, dim);
     //grid.fill_with_obstacles(world_obstacles);
 
+    robot_polygon_extended  << QPointF(-ROBOT_WIDTH/2-OFFSET, -ROBOT_LENGTH/2-OFFSET)
+                            << QPointF(-ROBOT_WIDTH/2-OFFSET, ROBOT_LENGTH/2+OFFSET)
+                            << QPointF(ROBOT_WIDTH/2+OFFSET, ROBOT_LENGTH/2+OFFSET)
+                            << QPointF(ROBOT_WIDTH/2+OFFSET, -ROBOT_LENGTH/2-OFFSET);
+
     //view
     init_drawing(dim);
 
@@ -78,10 +83,6 @@ void SpecificWorker::initialize(int period)
     read_base();
     auto laser_poly = read_laser();
     initialize_model(StateVector(0,0,0));
-    robot_polygon_extended  << QPointF(-ROBOT_WIDTH/2-OFFSET, -ROBOT_LENGTH/2-OFFSET)
-                            << QPointF(-ROBOT_WIDTH/2+OFFSET, ROBOT_LENGTH/2+OFFSET)
-                            << QPointF(-ROBOT_WIDTH/2+OFFSET, ROBOT_LENGTH/2+OFFSET)
-                            << QPointF(-ROBOT_WIDTH/2-OFFSET, -ROBOT_LENGTH/2-OFFSET);
 
     this->Period = 0;
 	if(this->startup_check_flag)
@@ -100,7 +101,7 @@ void SpecificWorker::compute()
 
     auto bState = read_base();
     auto [laser_poly, laser_data] = read_laser();  // returns poly in robot coordinates
-    //draw_laser(laser_poly);
+    draw_laser(laser_poly);
     //auto laser_free_regions = compute_laser_partitions(laser_poly);
     auto external_free_regions = compute_external_partitions(dim, map_obstacles, laser_poly, robot_polygon);
     std::vector<tuple<Lines, QPolygonF>> free_regions;
@@ -119,7 +120,7 @@ void SpecificWorker::compute()
     }
     if(not atTarget)
     {
-        QVec rtarget =  innerModel->transform("base", QVec::vec3(target.x(), 0., target.y()), "world");
+        QVec rtarget =  innerModel->transform("robot", QVec::vec3(target.x(), 0., target.y()), "world");
         double target_ang = -atan2(rtarget[0], rtarget[2]);
         double rot_error = -atan2(target.x() - bState.x, target.y() - bState.z) - bState.alpha;
         double pos_error = rtarget.norm2();
@@ -154,7 +155,7 @@ void SpecificWorker::compute()
             {
                 auto now = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
-                std::cout << __FUNCTION__ << " Completed in " << duration << " ms" << std::endl;
+                //std::cout << __FUNCTION__ << " Completed in " << duration << " ms" << std::endl;
                 //optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions, path);
                 solution_achieved = true;
                 int status = model->get(GRB_IntAttr_Status);
@@ -171,8 +172,7 @@ void SpecificWorker::compute()
                     path.clear();
                     path = compute_path();
                     local_controller(y, x, a, laser_data);
-                    //omnirobot_proxy->setSpeedBase(x, y, a);
-                    qInfo() << "Control " << x << y << a;
+                    //qInfo() << __FUNCTION__ << "Control " << x << y << a;
                     // draw
                     auto now = std::chrono::high_resolution_clock::now();
                     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
@@ -195,7 +195,6 @@ void SpecificWorker::local_controller( const std::vector<QPointF> &path, const R
     auto min = std::ranges::min_element(path, [r=QVector2D(robot)](auto &a, auto &b){ return (r-QVector2D(a)).lengthSquared() < (r-QVector2D(b)).lengthSquared();});
     QPointF current_point = *min;
 
-    // now y is forward direction and x is pointing rightwards
     float adv_vel = 0.f, rot_vel = 0.f;
 
     //robot nose
@@ -207,7 +206,7 @@ void SpecificWorker::local_controller( const std::vector<QPointF> &path, const R
 
     /// Compute rotational speed
     QLineF robot_to_nose(robot, robot_nose);
-    float angle = rewrapAngleRestricted(qDegreesToRadians(robot_to_nose.angleTo(QLineF(robot_nose, current_point))));
+    float angle = rewrapAngleRestricted(qDegreesToRadians(robot_to_nose.angleTo(QLineF(robot, current_point))));
     rot_vel = std::clamp(angle, -MAX_ROT_SPEED, MAX_ROT_SPEED);
 
     /// Compute advance speed
@@ -223,14 +222,14 @@ void SpecificWorker::local_controller(float adv_vel, float side_vel, float rot_v
     for (const auto &l : laser_data)
     {
         QPointF lp(l.dist*sin(l.angle), l.dist*cos(l.angle));
-        if(robot_polygon_extended.containsPoint(lp, Qt::OddEvenFill))
+        if(l.dist > 200 and robot_polygon_extended.containsPoint(lp, Qt::OddEvenFill))
             total = total - QVector2D(lp);
-
     }
     side_vel = std::clamp( float(total.x()/10. + side_vel), -MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+    qInfo() << __FUNCTION__ << side_vel << total;
     try
     {
-        omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
+        //omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;};
 }
@@ -377,7 +376,7 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
 
         // add new obstacle restrictions
         const float DW = 280.f, DL = 280.f;
-        static std::vector<std::tuple<float,float>> desp = {{0, 0}, {-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}};
+        static std::vector<std::tuple<float,float>> desp = {{0, 0}, {-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}, {0, -DW}, {0, DW}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size()); // avoids restriction over state[0]
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
         {
@@ -636,7 +635,7 @@ RoboCompGenericBase::TBaseState SpecificWorker::read_base()
     try
     {
         omnirobot_proxy->getBaseState(bState);
-        innerModel->updateTransformValues("base", bState.x, 0, bState.z, 0, -bState.alpha, 0);
+        innerModel->updateTransformValues("robot", bState.x, 0, bState.z, 0, -bState.alpha, 0);
         robot_polygon->setRotation(qRadiansToDegrees(bState.alpha));
         robot_polygon->setPos(bState.x, bState.z);
     }
@@ -758,6 +757,12 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
     marca_polygon->setParentItem(robot_polygon);
     marca_polygon->setPos(QPointF(0, ROBOT_LENGTH/2 - 40));
     robot_polygon->setZValue(5);
+
+    // extended shape
+    rc.setAlpha(30);
+    auto robot_polygon_extended_draw = scene.addPolygon(robot_polygon_extended, QPen(QColor("DarkRed")), QBrush(rc));
+    robot_polygon_extended_draw->setParentItem(robot_polygon);
+
     try
     {
         RoboCompGenericBase::TBaseState bState;
@@ -766,7 +771,7 @@ void SpecificWorker::init_drawing( Grid<>::Dimensions dim)
         robot_polygon->setPos(bState.x, bState.z);
     }
     catch(const Ice::Exception &e){std::cout << e.what() << std::endl;};
-    
+
     connect(splitter, &QSplitter::splitterMoved, [this](int pos, int index)
         {  custom_plot.resize(signal_frame->size()); graphicsView->fitInView(scene.sceneRect(), Qt::KeepAspectRatio); });
 }
@@ -822,7 +827,7 @@ std::vector<QPointF> SpecificWorker::compute_path()
     std::vector<QPointF> path(NUM_STEPS);
     std::generate(path.begin(), path.end(), [i=innerModel, s=state_vars, d=STATE_DIM, e=0]() mutable
     {
-        QVec p =  i->transform("world", QVec::vec3(s[e*d].get(GRB_DoubleAttr_X), 0., s[e*d+1].get(GRB_DoubleAttr_X)), "base");
+        QVec p =  i->transform("world", QVec::vec3(s[e*d].get(GRB_DoubleAttr_X), 0., s[e*d+1].get(GRB_DoubleAttr_X)), "robot");
         e++;
         return QPointF(p.x(), p.z());
     });

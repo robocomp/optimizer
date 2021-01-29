@@ -96,10 +96,11 @@ class SpecificWorker : public GenericWorker
         // constants
         const float MAX_SPIKING_ANGLE_rads = 0.2;
         const float MAX_RDP_DEVIATION_mm  =  70;
-        const uint NUM_STEPS = 16;
+        const uint NUM_STEPS = 12;
         float MAX_ADV_SPEED = 1000;
         float MAX_ROT_SPEED = 1;
         float MAX_SIDE_SPEED = 500;
+        std::string robot_name = "robot";
 
         constexpr static std::size_t STATE_DIM = 3; // Number of variables for the pose
         constexpr static std::size_t CONTROL_DIM = 3; // Number of variables for the velocity
