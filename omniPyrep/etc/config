@@ -8,8 +8,6 @@ CoppeliaUtils.Endpoints = tcp -p 10666
 # Endpoints for subscriptions interfaces
 JoystickAdapterTopic.Endpoints=tcp -p 13100
 
-
-
 # This property is used by the clients to connect to IceStorm.
 TopicManager.Proxy=IceStorm/TopicManager:default -p 9999
 
