@@ -96,7 +96,13 @@ class SpecificWorker : public GenericWorker
         // constants
         const float MAX_SPIKING_ANGLE_rads = 0.2;
         const float MAX_RDP_DEVIATION_mm  =  70;
-        const uint NUM_STEPS = 12;
+        const uint NUM_STEPS_FAR = 5;
+        const uint NUM_STEPS_NEAR = 5;
+        const uint NUM_STEPS = NUM_STEPS_FAR+NUM_STEPS_NEAR;
+        const uint FIRST_NEAR = 0;
+        const uint LAST_NEAR = NUM_STEPS_NEAR-1;
+        const uint FIRST_FAR = NUM_STEPS_NEAR;
+        const uint LAST_FAR = NUM_STEPS_NEAR+NUM_STEPS_FAR-1;
         float MAX_ADV_SPEED = 1000;
         float MAX_ROT_SPEED = 1;
         float MAX_SIDE_SPEED = 500;
@@ -177,23 +183,27 @@ class SpecificWorker : public GenericWorker
             GRBVar or_var;
             GRBGenConstr or_constraint;
             GRBConstr final_constraint;
+            bool null_constraint;
             void clear(GRBModel *model)
             {
-                model->remove(or_var);
-                model->remove(or_constraint);
-                model->remove(final_constraint);
-                for(auto &p : pdata)
+                if(not null_constraint)
                 {
-                    model->remove(p.and_var);
-                    model->remove(p.and_constraint);
-                    for(auto &lv : p.line_vars)
-                        model->remove(lv);
-                    p.line_vars.clear();
-                    for(auto &lc : p.line_constraints)
-                        model->remove(lc);
-                    p.line_constraints.clear();
+                    model->remove(or_var);
+                    model->remove(or_constraint);
+                    model->remove(final_constraint);
+                    for(auto &p : pdata)
+                    {
+                        model->remove(p.and_var);
+                        model->remove(p.and_constraint);
+                        for(auto &lv : p.line_vars)
+                            model->remove(lv);
+                        p.line_vars.clear();
+                        for(auto &lc : p.line_constraints)
+                            model->remove(lc);
+                        p.line_constraints.clear();
+                    }
+                    pdata.clear();
                 }
-                pdata.clear();
             }
         };
         std::vector<ObsData> obs_contraints;

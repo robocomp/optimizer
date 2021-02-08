@@ -156,7 +156,7 @@ void SpecificWorker::compute()
                 auto now = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
                 //std::cout << __FUNCTION__ << " Completed in " << duration << " ms" << std::endl;
-                //optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions, path);
+                optimize(StateVector(rtarget.x(), rtarget.z(), target_ang), free_regions, path);
                 solution_achieved = true;
                 int status = model->get(GRB_IntAttr_Status);
                 if (status != GRB_OPTIMAL)
@@ -164,15 +164,17 @@ void SpecificWorker::compute()
                     //omnirobot_proxy->setSpeedBase(0, 0, 0);
                     local_controller(path, laser_data, QPointF(bState.x, bState.z), QPointF(rtarget.x(), rtarget.z()));
                     qInfo() << __FUNCTION__ << "Result status:" << status;
-                } else
+                }
+                else
                 {
                     float x = control_vars[0].get(GRB_DoubleAttr_X);
                     float y = control_vars[1].get(GRB_DoubleAttr_X);
                     float a = control_vars[2].get(GRB_DoubleAttr_X);
+
                     path.clear();
                     path = compute_path();
                     local_controller(y, x, a, laser_data);
-                    //qInfo() << __FUNCTION__ << "Control " << x << y << a;
+                    qInfo() << __FUNCTION__ << "Control " << x << y << a;
                     // draw
                     auto now = std::chrono::high_resolution_clock::now();
                     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
@@ -217,7 +219,7 @@ void SpecificWorker::local_controller( const std::vector<QPointF> &path, const R
 
 void SpecificWorker::local_controller(float adv_vel, float side_vel, float rot_vel, const RoboCompLaser::TLaserData &laser_data)
 {
-    /// Compute bumper-away speed
+    // Compute bumper-away speed
     QVector2D total{0, 0};
     for (const auto &l : laser_data)
     {
@@ -229,7 +231,7 @@ void SpecificWorker::local_controller(float adv_vel, float side_vel, float rot_v
     qInfo() << __FUNCTION__ << side_vel << total;
     try
     {
-        //omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
+        omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;};
 }
@@ -270,7 +272,7 @@ void SpecificWorker::initialize_model(const StateVector &target)
 
         //state_vars[e*2+1].set(GRB_DoubleAttr_Start, path[e].y());
     }
-    for (uint e = 0; e < NUM_STEPS; e++)
+    for (uint e = FIRST_NEAR; e <= LAST_NEAR; e++)
     {
         ostringstream v_name_u, v_name_v, v_name_w;
         v_name_u << "u" << e;
@@ -289,19 +291,48 @@ void SpecificWorker::initialize_model(const StateVector &target)
         control_vars[e * CONTROL_DIM + 2].set(GRB_DoubleAttr_UB, M_PI);
     }
 
+    for (uint e = FIRST_FAR; e <= LAST_FAR; e++)
+    {
+        ostringstream v_name_u, v_name_v, v_name_w;
+        v_name_u << "u" << e;
+        control_vars[e * CONTROL_DIM].set(GRB_StringAttr_VarName, v_name_u.str());
+        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_LB, -1000);
+        control_vars[e * CONTROL_DIM].set(GRB_DoubleAttr_UB, +1000);
+
+        v_name_v << "v" << e;
+        control_vars[e * CONTROL_DIM + 1].set(GRB_StringAttr_VarName, v_name_v.str());
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_LB, -1000);
+        control_vars[e * CONTROL_DIM + 1].set(GRB_DoubleAttr_UB, +1000);
+
+        v_name_w << "w" << e;
+        control_vars[e * CONTROL_DIM + 2].set(GRB_StringAttr_VarName, v_name_w.str());
+        control_vars[e * CONTROL_DIM + 2].set(GRB_DoubleAttr_LB, -M_PI);
+        control_vars[e * CONTROL_DIM + 2].set(GRB_DoubleAttr_UB, M_PI);
+    }
+
+
     // initial state value
-    model->addConstr(state_vars[0] == 0, "c0x");
-    model->addConstr(state_vars[1] == 0, "c0y");
-    model->addConstr(state_vars[2] == 0, "c0a");
+    model->addConstr(state_vars[FIRST_NEAR * STATE_DIM] == 0, "c0xN");
+    model->addConstr(state_vars[FIRST_NEAR * STATE_DIM + 1] == 0, "c0yN");
+    model->addConstr(state_vars[FIRST_NEAR * STATE_DIM + 2] == 0, "c0aN");
+
+    model->addConstr(state_vars[FIRST_FAR * STATE_DIM] == 0, "c0xF");
+    model->addConstr(state_vars[FIRST_FAR * STATE_DIM + 1] == 0, "c0yF");
+    model->addConstr(state_vars[FIRST_FAR * STATE_DIM + 2] == 0, "c0aF");
+
 
     // final state should be equal to target
     // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target.x(), "c1x");
     // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target.y(), "c1y");
-    model->addConstr(state_vars[(NUM_STEPS / 4) * STATE_DIM + 2] == target[2], "c1a");
+    // model->addConstr(state_vars[(NUM_STEPS / 4) * STATE_DIM + 2] == target[2], "c1a");
+    model->addConstr(state_vars[(FIRST_FAR+LAST_FAR)/2 * STATE_DIM + 2] == target[2], "c1aF");
+    model->addConstr(state_vars[(FIRST_NEAR+1) * STATE_DIM + 2] == state_vars[(FIRST_FAR+1) * STATE_DIM + 2], "c1aN");
 
     // model dynamics constraint x = Ax + Bu
     for (uint e = 0; e < NUM_STEPS - 1; e++)
     {
+        if(e==LAST_NEAR)
+            continue;
         ostringstream v_name_cx, v_name_cy, v_name_cang;
         GRBLinExpr le, re;
 
@@ -347,7 +378,8 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         // remove endpoint restrictions
         // model->remove(model->getConstrByName("c1x"));
         // model->remove(model->getConstrByName("c1y"));
-        model->remove(model->getConstrByName("c1a"));
+        model->remove(model->getConstrByName("c1aF"));
+        model->remove(model->getConstrByName("c1aN"));
 
         // remove all obstacle restrictions
         for (auto &constr : obs_contraints)
@@ -358,14 +390,36 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         // add target state restriction
         //model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target_state.x(), "c1x");
         //model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target_state.y(), "c1y");
-        model->addConstr(state_vars[(NUM_STEPS/3 - 1) * STATE_DIM + 2] == target_state[2], "c1a");
+        model->addConstr(state_vars[(FIRST_FAR+LAST_FAR)/2 * STATE_DIM + 2] == target_state[2], "c1aF");
+        model->addConstr(state_vars[(FIRST_NEAR+1) * STATE_DIM + 2] == state_vars[(FIRST_FAR+1) * STATE_DIM + 2], "c1aN");
 
         this->obj = GRBQuadExpr();
-        for (uint e = 0; e < NUM_STEPS ; e++)
+        for (uint e = 0; e < NUM_STEPS-1 ; e++)
         {
             this->obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.002;
             this->obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.002;
             this->obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];  // angular modulus
+        }
+
+        for (uint e = FIRST_FAR; e < LAST_FAR-1 ; e++)
+        {
+            this->obj += (control_vars[e * CONTROL_DIM] - control_vars[(e+1) * CONTROL_DIM]) * (control_vars[e * CONTROL_DIM] - control_vars[(e+1) * CONTROL_DIM]);
+            this->obj += (control_vars[e * CONTROL_DIM + 1] - control_vars[(e+1) * CONTROL_DIM + 1 ]) * (control_vars[e * CONTROL_DIM +1] - control_vars[(e+1) * CONTROL_DIM + 1]);
+            this->obj += (control_vars[e * CONTROL_DIM + 2] - control_vars[(e+1) * CONTROL_DIM + 2]) * (control_vars[e * CONTROL_DIM + 2] - control_vars[(e+1) * CONTROL_DIM + 2]);  // angular modulus
+        }
+
+
+        for (uint e = FIRST_NEAR; e <= LAST_NEAR ; e++)
+        {
+
+            this->obj += (state_vars[e * STATE_DIM] - state_vars[(FIRST_FAR+1) * STATE_DIM]) * (state_vars[e * STATE_DIM] - state_vars[(FIRST_FAR+1) * STATE_DIM]); // x state modulus
+            this->obj += (state_vars[e * STATE_DIM + 1] - state_vars[(FIRST_FAR+1) * STATE_DIM+1]) * (state_vars[e * STATE_DIM + 1] - state_vars[(FIRST_FAR+1) * STATE_DIM +1 ]); // y state modulus
+
+        }
+
+        //std::vector<uint> p = {FIRST_FAR+1, LAST_FAR};
+        for (uint e = FIRST_FAR; e <= LAST_FAR ; e++)
+        {
 
             this->obj += (state_vars[e * STATE_DIM] - target_state.x()) * (state_vars[e * STATE_DIM] - target_state.x()); // x state modulus
             this->obj += (state_vars[e * STATE_DIM + 1] - target_state.y()) * (state_vars[e * STATE_DIM + 1] - target_state.y()); // y state modulus
@@ -375,14 +429,20 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         // this->obj += (state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] - target_state.y())*(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] - target_state.y());
 
         // add new obstacle restrictions
-        const float DW = 280.f, DL = 280.f;
-        static std::vector<std::tuple<float,float>> desp = {{0, 0}, {-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}, {0, -DW}, {0, DW}};
+        const float DW = 350.f, DL = 350.f;
+        static std::vector<std::tuple<float,float>> desp = {{0, 0}, {-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}, {0, -DL}, {0, DL}, {-DW, 0}, {DW, 0}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size()); // avoids restriction over state[0]
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
         {
             auto &[dx, dy] = d;
             for (uint e = 1; e < NUM_STEPS-1; e++)   // avoids restriction over state[0]
             {
+                if(e==FIRST_NEAR or e==FIRST_FAR)
+                {
+                    obs_contraints[(e-1)*desp.size()+i].null_constraint = true;
+                    continue;
+                }
+
                 ObsData obs_data;
                 obs_data.pdata.resize(obstacles.size());
                 GRBVar temp_and_vars[obstacles.size()];
@@ -416,6 +476,7 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
                 obs_data.or_var = model->addVar(0.0, 1.0, 0.0, GRB_BINARY);
                 obs_data.or_constraint = model->addGenConstrOr(obs_data.or_var, temp_and_vars, obs_data.pdata.size());
                 obs_data.final_constraint = model->addConstr(obs_data.or_var, GRB_EQUAL,  1.0);  //
+                obs_data.null_constraint = false;
                 obs_contraints[(e-1)*desp.size()+i] = obs_data;
             }
         }  // All points of the robot are finished
@@ -795,8 +856,21 @@ void SpecificWorker::draw_path(const std::vector<QPointF> &path)
     for(auto p : path_paint)
         scene.removeItem(p);
     path_paint.clear();
-    for(auto &p : path)
-        path_paint.push_back(scene.addEllipse(p.x()-25, p.y()-25, 50 , 50, QPen(path_color), QBrush(QColor(path_color))));
+    uint s;
+    for(auto &&[e, p] : iter::enumerate(path))
+    {
+        if(e<LAST_NEAR)
+        {
+            path_color = "LightGreen";
+            s = 150;
+        }
+        else
+        {
+            path_color = "DarkBlue";
+            s = 100;        
+        }
+        path_paint.push_back(scene.addEllipse(p.x()-s/2, p.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
+    }    
 }
 
 void SpecificWorker::draw_target(const RoboCompGenericBase::TBaseState &bState, QPointF t)
