@@ -129,29 +129,29 @@ void SpecificWorker::compute()
             stop_robot();
         else
         {
-            if(solution_achieved)
-            {
-                //qInfo() << __FUNCTION__ << "new call to async";
-                t = std::chrono::high_resolution_clock::now();
-                future_result = std::async(std::launch::async, &SpecificWorker::optimize,
-                                           this, StateVector(rtarget.x(), rtarget.z(), target_ang),
-                                           free_regions, path);
-                solution_achieved = false;
-            }
-            if(future_result.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready)
-            {   // move the robot along previous path or stop it if none
-                if( not path.empty() )
-                {
-                    local_controller(path, laser_data, QPointF(bState.x, bState.z), QPointF(rtarget.x(), rtarget.z()));
-                    //omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
-                }
-                else
-                {
-                    omnirobot_proxy->setSpeedBase(0, 0, 0);
-                    qInfo() << __FUNCTION__ << "Not path ready yet";
-                }
-            }
-            else //move with new controller
+            // if(solution_achieved)
+            // {
+            //     //qInfo() << __FUNCTION__ << "new call to async";
+            //     t = std::chrono::high_resolution_clock::now();
+            //     future_result = std::async(std::launch::async, &SpecificWorker::optimize,
+            //                                this, StateVector(rtarget.x(), rtarget.z(), target_ang),
+            //                                free_regions, path);
+            //     solution_achieved = false;
+            // }
+            // if(future_result.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready)
+            // {   // move the robot along previous path or stop it if none
+            //     if( not path.empty() )
+            //     {
+            //         local_controller(path, laser_data, QPointF(bState.x, bState.z), QPointF(rtarget.x(), rtarget.z()));
+            //         //omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
+            //     }
+            //     else
+            //     {
+            //         omnirobot_proxy->setSpeedBase(0, 0, 0);
+            //         qInfo() << __FUNCTION__ << "Not path ready yet";
+            //     }
+            // }
+            // else //move with new controller
             {
                 auto now = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
@@ -162,7 +162,7 @@ void SpecificWorker::compute()
                 if (status != GRB_OPTIMAL)
                 {
                     //omnirobot_proxy->setSpeedBase(0, 0, 0);
-                    local_controller(path, laser_data, QPointF(bState.x, bState.z), QPointF(rtarget.x(), rtarget.z()));
+                    //local_controller(path, laser_data, QPointF(bState.x, bState.z), QPointF(rtarget.x(), rtarget.z()));
                     qInfo() << __FUNCTION__ << "Result status:" << status;
                 }
                 else
@@ -220,15 +220,15 @@ void SpecificWorker::local_controller( const std::vector<QPointF> &path, const R
 void SpecificWorker::local_controller(float adv_vel, float side_vel, float rot_vel, const RoboCompLaser::TLaserData &laser_data)
 {
     // Compute bumper-away speed
-    QVector2D total{0, 0};
-    for (const auto &l : laser_data)
-    {
-        QPointF lp(l.dist*sin(l.angle), l.dist*cos(l.angle));
-        if(l.dist > 200 and robot_polygon_extended.containsPoint(lp, Qt::OddEvenFill))
-            total = total - QVector2D(lp);
-    }
-    side_vel = std::clamp( float(total.x()/10. + side_vel), -MAX_SIDE_SPEED, MAX_SIDE_SPEED);
-    qInfo() << __FUNCTION__ << side_vel << total;
+    // QVector2D total{0, 0};
+    // for (const auto &l : laser_data)
+    // {
+    //     QPointF lp(l.dist*sin(l.angle), l.dist*cos(l.angle));
+    //     if(l.dist > 200 and robot_polygon_extended.containsPoint(lp, Qt::OddEvenFill))
+    //         total = total - QVector2D(lp);
+    // }
+    // side_vel = std::clamp( float(total.x()/10. + side_vel), -MAX_SIDE_SPEED, MAX_SIDE_SPEED);
+    // qInfo() << __FUNCTION__ << side_vel << total;
     try
     {
         omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
@@ -325,8 +325,8 @@ void SpecificWorker::initialize_model(const StateVector &target)
     // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM] == target.x(), "c1x");
     // model->addConstr(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] == target.y(), "c1y");
     // model->addConstr(state_vars[(NUM_STEPS / 4) * STATE_DIM + 2] == target[2], "c1a");
-    model->addConstr(state_vars[(FIRST_FAR+LAST_FAR)/2 * STATE_DIM + 2] == target[2], "c1aF");
-    model->addConstr(state_vars[(FIRST_NEAR+1) * STATE_DIM + 2] == state_vars[(FIRST_FAR+1) * STATE_DIM + 2], "c1aN");
+    model->addConstr(state_vars[(FIRST_FAR+LAST_FAR)/3 * STATE_DIM + 2] == target[2], "c1aF");
+    model->addConstr(state_vars[(LAST_NEAR+1) * STATE_DIM + 2] == state_vars[(FIRST_FAR+1) * STATE_DIM + 2], "c1aN");
 
     // model dynamics constraint x = Ax + Bu
     for (uint e = 0; e < NUM_STEPS - 1; e++)
@@ -396,8 +396,8 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         this->obj = GRBQuadExpr();
         for (uint e = 0; e < NUM_STEPS-1 ; e++)
         {
-            this->obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.002;
-            this->obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.002;
+            this->obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.1;
+            this->obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.1;
             this->obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];  // angular modulus
         }
 
@@ -405,7 +405,7 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         {
             this->obj += (control_vars[e * CONTROL_DIM] - control_vars[(e+1) * CONTROL_DIM]) * (control_vars[e * CONTROL_DIM] - control_vars[(e+1) * CONTROL_DIM]);
             this->obj += (control_vars[e * CONTROL_DIM + 1] - control_vars[(e+1) * CONTROL_DIM + 1 ]) * (control_vars[e * CONTROL_DIM +1] - control_vars[(e+1) * CONTROL_DIM + 1]);
-            this->obj += (control_vars[e * CONTROL_DIM + 2] - control_vars[(e+1) * CONTROL_DIM + 2]) * (control_vars[e * CONTROL_DIM + 2] - control_vars[(e+1) * CONTROL_DIM + 2]);  // angular modulus
+            //this->obj += (control_vars[e * CONTROL_DIM + 2] - control_vars[(e+1) * CONTROL_DIM + 2]) * (control_vars[e * CONTROL_DIM + 2] - control_vars[(e+1) * CONTROL_DIM + 2]);  // angular modulus
         }
 
 
