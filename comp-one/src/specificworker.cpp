@@ -175,6 +175,17 @@ void SpecificWorker::compute()
                     path = compute_path();
                     local_controller(y, x, a, laser_data);
                     qInfo() << __FUNCTION__ << "Control " << x << y << a;
+                    // for(uint e=FIRST_NEAR; e<=LAST_NEAR; e++)
+                    // {
+                    //     qDebug()<<"control near"<<e<<control_vars[e*CONTROL_DIM].get(GRB_DoubleAttr_X)<<control_vars[e*CONTROL_DIM+1].get(GRB_DoubleAttr_X)<<control_vars[e*CONTROL_DIM+2].get(GRB_DoubleAttr_X);
+                    //     qDebug()<<"state near"<<e<<state_vars[e*STATE_DIM].get(GRB_DoubleAttr_X)<<state_vars[e*STATE_DIM+1].get(GRB_DoubleAttr_X)<<state_vars[e*STATE_DIM+2].get(GRB_DoubleAttr_X);
+                    // }
+                    // for(uint e=FIRST_FAR; e<=LAST_FAR; e++)
+                    // {
+                    //     qDebug()<<"control far"<<e<<control_vars[e*CONTROL_DIM].get(GRB_DoubleAttr_X)<<control_vars[e*CONTROL_DIM+1].get(GRB_DoubleAttr_X)<<control_vars[e*CONTROL_DIM+2].get(GRB_DoubleAttr_X);
+                    //     qDebug()<<"state far"<<e<<state_vars[e*STATE_DIM].get(GRB_DoubleAttr_X)<<state_vars[e*STATE_DIM+1].get(GRB_DoubleAttr_X)<<state_vars[e*STATE_DIM+2].get(GRB_DoubleAttr_X);
+                    // }
+
                     // draw
                     auto now = std::chrono::high_resolution_clock::now();
                     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count();
@@ -231,7 +242,7 @@ void SpecificWorker::local_controller(float adv_vel, float side_vel, float rot_v
     // qInfo() << __FUNCTION__ << side_vel << total;
     try
     {
-        omnirobot_proxy->setSpeedBase(side_vel, adv_vel, rot_vel);
+        omnirobot_proxy->setSpeedBase(side_vel, adv_vel, -rot_vel);
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;};
 }
@@ -394,12 +405,20 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         model->addConstr(state_vars[(FIRST_NEAR+1) * STATE_DIM + 2] == state_vars[(FIRST_FAR+1) * STATE_DIM + 2], "c1aN");
 
         this->obj = GRBQuadExpr();
-        for (uint e = 0; e < NUM_STEPS-1 ; e++)
+        for (uint e = FIRST_FAR+1; e < LAST_FAR ; e++)
         {
             this->obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.1;
             this->obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.1;
             this->obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];  // angular modulus
         }
+
+        for (uint e = FIRST_NEAR+1; e < LAST_FAR ; e++)
+        {
+            this->obj += control_vars[e * CONTROL_DIM] * control_vars[e * CONTROL_DIM] * 0.1;
+            this->obj += control_vars[e * CONTROL_DIM + 1] * control_vars[e * CONTROL_DIM + 1] * 0.1;
+            this->obj += control_vars[e * CONTROL_DIM + 2] * control_vars[e * CONTROL_DIM + 2];  // angular modulus
+        }
+
 
         for (uint e = FIRST_FAR; e < LAST_FAR-1 ; e++)
         {
@@ -429,7 +448,7 @@ void SpecificWorker::optimize(const StateVector &target_state, const Obstacles &
         // this->obj += (state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] - target_state.y())*(state_vars[(NUM_STEPS - 1) * STATE_DIM + 1] - target_state.y());
 
         // add new obstacle restrictions
-        const float DW = 350.f, DL = 350.f;
+        const float DW = 300.f, DL = 300.f;
         static std::vector<std::tuple<float,float>> desp = {{0, 0}, {-DW, -DL}, {-DW, DL}, {DW, -DL}, {DW, DL}, {0, -DL}, {0, DL}, {-DW, 0}, {DW, 0}};
         obs_contraints.resize((NUM_STEPS-2) * desp.size()); // avoids restriction over state[0]
         for(auto &&[i, d] : iter::enumerate(desp))  // each point of the robot has to be inside a free polygon in all states
