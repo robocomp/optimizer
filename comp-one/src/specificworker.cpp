@@ -32,8 +32,6 @@ using namespace std::literals;
 */
 SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorker(tprx)
 {
-    qInfo() << "hola";
-
     this->startup_check_flag = startup_check;
 	readSettings();
 }

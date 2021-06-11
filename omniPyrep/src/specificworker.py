@@ -167,7 +167,10 @@ class SpecificWorker(GenericWorker):
             focal = semiwidth/np.tan(semiangle)
             data = laser.capture_depth(in_meters=True)
             m = laser.get_matrix(robot)     # these data should be read first
-            imat = np.array([[m[0],m[1],m[2],m[3]],[m[4],m[5],m[6],m[7]],[m[8],m[9],m[10],m[11]],[0,0,0,1]])
+            if type(m) != list:
+                m = [item for sublist in m for item in sublist]
+            imat = np.array(
+                [[m[0], m[1], m[2], m[3]], [m[4], m[5], m[6], m[7]], [m[8], m[9], m[10], m[11]], [0, 0, 0, 1]])
 
             for i,d in enumerate(data.T):
                 z = d[0]        # min if more than one row in depth image

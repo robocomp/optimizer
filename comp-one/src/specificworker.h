@@ -33,7 +33,7 @@
 #include "grid.cpp"
 #include "grid.h"
 #include <Eigen/Dense>
-#include "gurobi_c++.h"
+#include <gurobi_c++.h>
 #include "qcustomplot.h"
 #include <doublebuffer/DoubleBuffer.h>
 #include "polypartition.h"

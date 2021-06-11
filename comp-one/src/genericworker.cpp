@@ -35,7 +35,7 @@ GenericWorker::GenericWorker(TuplePrx tprx) : Ui_guiDlg()
 	#endif
 	Period = BASIC_PERIOD;
 	connect(&timer, SIGNAL(timeout()), this, SLOT(compute()));
-    qInfo() << "hola";
+
 }
 
 /**

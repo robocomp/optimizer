@@ -169,8 +169,8 @@ int ::compone::run(int argc, char* argv[])
 
 
 	tprx = std::make_tuple(laser_proxy,omnirobot_proxy);
-    SpecificWorker *worker = new SpecificWorker(tprx, startup_check_flag);
-    //Monitor thread
+	SpecificWorker *worker = new SpecificWorker(tprx, startup_check_flag);
+	//Monitor thread
 	SpecificMonitor *monitor = new SpecificMonitor(worker,communicator());
 	QObject::connect(monitor, SIGNAL(kill()), &a, SLOT(quit()));
 	QObject::connect(worker, SIGNAL(kill()), &a, SLOT(quit()));
