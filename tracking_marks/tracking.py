@@ -52,8 +52,7 @@ ca = SX.sym('ca')
 
 corner = Function('f11', [ca, cx, cy], [cos(ca)*(cx) - sin(ca)*(cy), sin(ca)*(cx) + cos(ca)*(cy)])
 
-
-# X = MX.sym("X", 1, 8)
+# corner coordinates from center
 indices = [[1, 1], [1, -1], [-1, -1], [-1, 1]]
 
 cost = SX.sym("E", 1, 16)
