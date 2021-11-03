@@ -45,7 +45,7 @@ class LShapeFitting:
         self.criteria = self.Criteria.VARIANCE
         self.min_dist_of_closeness_criteria = 0.01  # [m]
         self.d_theta_deg_for_search = 1.0  # [deg]
-        self.R0 = 3.0  # [m] range segmentation param
+        self.R0 = 0.5  # [m] range segmentation param
         self.Rd = 0.001  # [m] range segmentation param
 
     def fitting(self, ox, oy):
