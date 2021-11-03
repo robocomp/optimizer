@@ -28,11 +28,10 @@ noise = 0.03 * np.random.randn(npoints, 2)
 pts = pts_o + noise;
 
 # add points beyond the door
-pts = np.append(pts, np.array([[2, 0], [2, 0.1], [2, 0.2], [2, 0.3], [2, -0.1], [2, -0.2], [2, -0.3]]), axis=0)
+#pts = np.append(pts, np.array([[2, 0], [2, 0.1], [2, 0.2], [2, 0.3], [2, -0.1], [2, -0.2], [2, -0.3]]), axis=0)
+pts = np.append(pts, np.array([[2, 0], [2, 0.1], [2, -0.1], [2, -0.2]]), axis=0)
 
-# RANSAC  Robustly fit linear model with RANSAC algorithm
-#############################################
-#IEPF
+#https://www.ri.cmu.edu/wp-content/uploads/2017/07/Xiao-2017-Efficient-L-Shape-Fitting.pdf
 ##############################################
 class LShapeFitting:
 
