@@ -1,0 +1,11 @@
+import "RoomDetection.idsl";
+
+Component roomDetection
+{
+	Communications
+	{
+		implements RoomDetection;
+	};
+	language Python;
+};
+
