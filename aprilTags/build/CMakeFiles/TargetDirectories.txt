@@ -1,0 +1,5 @@
+/home/robo02/Escritorio/aprilTagsPose/build/CMakeFiles/rebuild_cache.dir
+/home/robo02/Escritorio/aprilTagsPose/build/CMakeFiles/edit_cache.dir
+/home/robo02/Escritorio/aprilTagsPose/build/src/CMakeFiles/rebuild_cache.dir
+/home/robo02/Escritorio/aprilTagsPose/build/src/CMakeFiles/edit_cache.dir
+/home/robo02/Escritorio/aprilTagsPose/build/src/CMakeFiles/ICES__home_robo02_Escritorio_aprilTagsPose_src.dir

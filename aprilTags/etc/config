@@ -1,0 +1,9 @@
+# Endpoints for implements interfaces
+FullPoseEstimation.Endpoints=tcp -p 15176
+
+Ice.Warn.Connections=0
+Ice.Trace.Network=0
+Ice.Trace.Protocol=0
+Ice.MessageSizeMax=20004800
+
+coords=[(100, [0, +193]), (101, [+157, +80]), (102, [+157, -80]), (103, [0, -193]), (104, [-191, -80]), (105, [-191,+80])]
