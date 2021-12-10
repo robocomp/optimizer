@@ -1,0 +1,10 @@
+import "FullPoseEstimation.idsl";
+Component aprilTagsPose
+{
+    Communications
+    {
+        implements FullPoseEstimation;
+    };
+    language python;
+};
+
