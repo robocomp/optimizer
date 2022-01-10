@@ -20,12 +20,12 @@ corners = np.transpose(np.matmul(rot, np.transpose(corners)))
 
 pts_o = np.array([corners[0]])
 for a, b in pairwise(corners):
-    pts_o = np.append(pts_o, np.array([a*landa + b*(1-landa) for landa in np.arange(0, 1, 0.05)]), axis=0)
-pts_o = np.append(pts_o, np.array([corners[0]*landa + b*(1-landa) for landa in np.arange(0, 1, 0.05)]), axis=0)
+    pts_o = np.append(pts_o, np.array([a*landa + b*(1-landa) for landa in np.arange(0, 1, 0.01)]), axis=0)
+pts_o = np.append(pts_o, np.array([corners[0]*landa + b*(1-landa) for landa in np.arange(0, 1, 0.01)]), axis=0)
 npoints = pts_o.shape[0]
 pts_o = np.c_[pts_o, np.ones(npoints)]
 
-noise = np.random.normal(0, 0.12, size=(npoints, 2))
+noise = np.random.normal(0, 0.07, size=(npoints, 2))
 noise = np.c_[noise, np.zeros(npoints)]
 pts = pts_o + noise;
 #pts = pts_o
@@ -43,6 +43,8 @@ pts = np.append(pts, np.array([[2.2, 0, 1], [2.2, 0.1, 1], [2.2, 0.2, 1], [2.2, 
                                [2.2, -0.1, 1], [2.2, -0.2, 1], [2.2, -0.3, 1], [2.2, -0.4, 1], [2.2, -0.5, 1]]), axis=0)
 pts = np.append(pts, np.array([[0, -2, 1], [0.1, -2, 1], [0.2, -2, 1], [0.3, -2, 1],
                                [-0.1, -2, 1], [-0.2, -2, 1], [-0.3, -2, 1], [-0.4, -2, 1]]), axis=0)
+# pts = np.append(pts, np.array([[0, 0, 1], [0.1, 0, 1], [0.2, 0, 1], [0.3, 0, 1],
+#                                [-0.1, 0, 1], [-0.2, 0, 1], [-0.3, 0, 1], [-0.4, 0, 1]]), axis=0)
 
 # move to millimeters in Beta
 pts[:, 0] *= 1000
@@ -103,21 +105,22 @@ sides = pts.std(axis=0)
 sw = sides[0]
 sh = sides[1]
 print("Initial values:", center, sides)
+print("Points:", pts.shape[0])
 axis = [cx, cy, sw, sh]
 #deltas = [-0.01, 0.01]
-deltas = [-sides[0]/100, sides[0]/100]
+deltas = [-sides[0]/500, sides[0]/500]
 pts_orig = pts      # save to draw
 desv = np.finfo(float).max
 print("Optmizing...")
 while( desv > 150):
-    axis, e, iter, m_dist = optimize(pts, axis, deltas, 10000)
+    axis, e, iter, m_dist = optimize(pts, axis, deltas, 30000)
     print("Error %.2f" % e)
     print(" Params:", axis)
     print(" iter:", iter)
     desv = m_dist.std()
     print(" Mean: %.2f" % m_dist.mean(), "Var: %.5f" % m_dist.std())
     # outliers: those with error greater than 10 times the std
-    outliers = np.where(m_dist > m_dist.mean()*(desv/100.0))
+    outliers = np.where(m_dist > m_dist.mean()*(desv/80.0))
     print(" Num outliers:", len(outliers[0]))
     # remove outliers
     pts = np.delete(pts, outliers[0], axis=0)

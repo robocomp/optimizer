@@ -46,7 +46,6 @@ from scipy.spatial.transform import Rotation as Rot
 from scipy import linspace, polyval, polyfit, sqrt, stats, randn
 import copy
 
-
 class SpecificWorker(GenericWorker):
     class Criteria(Enum):
         AREA = 1
@@ -59,7 +58,7 @@ class SpecificWorker(GenericWorker):
         self.criteria = self.Criteria.VARIANCE
         self.min_dist_of_closeness_criteria = 0.01  # [m]
         self.d_theta_deg_for_search = 1.0  # [deg]
-        self.R0 = 0.5  # [m] range segmentation param
+        self.R0 = 0.6  # [m] range segmentation param
         self.Rd = 0.001  # [m] range segmentation param
 
         if startup_check:
@@ -82,20 +81,6 @@ class SpecificWorker(GenericWorker):
     @QtCore.Slot()
     def compute(self):
         print('SpecificWorker.compute...')
-        # computeCODE
-        # try:
-        #   self.differentialrobot_proxy.setSpeedBase(100, 0)
-        # except Ice.Exception as e:
-        #   traceback.print_exc()
-        #   print(e)
-
-        # The API of python-innermodel is not exactly the same as the C++ version
-        # self.innermodel.updateTransformValues('head_rot_tilt_pose', 0, 0, 0, 1.3, 0, 0)
-        # z = librobocomp_qmat.QVec(3,0)
-        # r = self.innermodel.transform('rgbd', z, 'laser')
-        # r.printvector('d')
-        # print(r[0], r[1], r[2])
-
         return True
 
     def startup_check(self):
@@ -109,6 +94,7 @@ class SpecificWorker(GenericWorker):
 
         # step2 Rectangle search
         rects = RoboCompRoomDetection.Rooms()
+        print(len(id_sets))
         for ids in id_sets:  # for each cluster
             cx = [ox[i] for i in range(len(ox)) if i in ids]
             cy = [oy[i] for i in range(len(oy)) if i in ids]
@@ -210,15 +196,21 @@ class SpecificWorker(GenericWorker):
 
         rect_c = RoboCompRoomDetection.Corner()
         rectangle = RoboCompRoomDetection.ListOfPoints()
-        rect_c.x, rect_c.y = self.calc_cross_point( a[0:2], b[0:2], c[0:2])
+        rect_c.x, rect_c.y = self.calc_cross_point(a[0:2], b[0:2], c[0:2])
+        rect_c.x *= 1000.0
+        rect_c.y *= 1000.0
         rectangle.append(copy.deepcopy(rect_c))
         rect_c.x, rect_c.y = self.calc_cross_point(a[1:3], b[1:3], c[1:3])
+        rect_c.x *= 1000.0
+        rect_c.y *= 1000.0
         rectangle.append(copy.deepcopy(rect_c))
         rect_c.x, rect_c.y = self.calc_cross_point(a[2:4], b[2:4], c[2:4])
+        rect_c.x *= 1000.0
+        rect_c.y *= 1000.0
         rectangle.append(copy.deepcopy(rect_c))
         rect_c.x, rect_c.y = self.calc_cross_point([a[3], a[0]], [b[3], b[0]], [c[3], c[0]])
-        rectangle.append(copy.deepcopy(rect_c))
-        rect_c.x, rect_c.y = rectangle[0].x, rectangle[0].y
+        rect_c.x *= 1000.0
+        rect_c.y *= 1000.0
         rectangle.append(copy.deepcopy(rect_c))
         return rectangle
 
@@ -263,13 +255,10 @@ class SpecificWorker(GenericWorker):
     #
     def RoomDetection_detectRoom(self, l):
 
-        lX = [p.x for p in l]
-        lY = [p.y for p in l]
+        lX = [p.x/1000.0 for p in l]
+        lY = [p.y/1000.0 for p in l]
+        #print(lX, lY)
         ret = self.fitting(lX, lY)
-
-        #
-        # write your CODE here
-        #
         return ret
     # ===================================================================
     # ===================================================================
