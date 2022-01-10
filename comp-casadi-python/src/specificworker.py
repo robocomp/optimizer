@@ -29,6 +29,7 @@ import casadi as ca
 import sys, signal
 from loguru import logger
 from pylab import plot, step, figure, legend, show, spy
+import matplotlib.pyplot as plt
 
 sys.path.append('/opt/robocomp/lib')
 console = Console(highlight=False)
@@ -41,7 +42,7 @@ class SpecificWorker(GenericWorker):
             self.startup_check()
         else:
 
-            self.target_pose = [1, 1]  # meter
+            self.target_pose = [0, 1]  # meter
             self.initialize()
 
             self.timer.timeout.connect(self.compute)
@@ -65,23 +66,22 @@ class SpecificWorker(GenericWorker):
     def compute(self):
         try:
             currentPose = self.omnirobot_proxy.getBaseState()
-            #print(currentPose)
+            print(currentPose)
         except:
             print("Error connecting to base")
 
         if abs(currentPose.z/1000 - self.target_pose[1]) > 0.01:
 
             # ---- initial values for solver ---
-            self.opti.set_initial(self.pos_x, currentPose.x/1000)
-            self.opti.set_initial(self.pos_y, currentPose.z/1000)
-            self.opti.set_initial(self.phi, currentPose.alpha)
+            self.opti.set_initial(self.pos_x[0], currentPose.x/1000)
+            self.opti.set_initial(self.pos_y[0], currentPose.z/1000)
+            self.opti.set_initial(self.phi[0], currentPose.alpha)
 
             # ---- solve NLP              ------
             p_opts = {"expand": True}
             s_opts = {"max_iter": 1000,  'print_level': 0}
             self.opti.solver("ipopt", p_opts, s_opts)  # set numerical backend
             sol = self.opti.solve()  # actual solve
-            print(sol.value(self.v_x[0]*1000), sol.value(self.v_y[0]*1000), sol.value(self.v_rot[0]))
 
             try:
                 pass
@@ -92,9 +92,11 @@ class SpecificWorker(GenericWorker):
         #plot(sol.value(self.v_x), label="vx")
         #plot(sol.value(self.v_y), label="vy")
         #plot(sol.value(self.v_rot), label="vrot")
-        print(sol.value(self.pos_y))
-        plot(sol.value(self.pos_x), label="px")
-        plot(sol.value(self.pos_y), label="py")
+        #print("HOLA", [sol.value(self.pos_x*1000), sol.value(self.pos_y*1000)])
+        #plt.scatter(sol.value(self.pos_x*1000), sol.value(self.pos_y*1000))
+        plt.plot(sol.value(self.pos_x*1000), sol.value(self.pos_y*1000), '->')
+        #plot(sol.value(self.pos_x), label="px")
+        #plot(sol.value(self.pos_y), label="py")
         legend(loc="upper left")
         show()
 
@@ -121,9 +123,8 @@ class SpecificWorker(GenericWorker):
 
         # ---- cost function          ---------
         self.opti.set_initial(self.target, self.target_pose)
-        self.opti.minimize(ca.sumsqr(self.v_x) +
-                           ca.sumsqr(self.v_y) +
-                           ca.sumsqr(self.v_rot) +
+        self.opti.set_initial(self.T, 1)
+        self.opti.minimize(ca.sumsqr(self.v_rot) +
                            ca.sumsqr(self.X[0:2, -1]-self.target_pose))  # minimum length
 
         # ---- dynamic constraints --------
@@ -158,13 +159,13 @@ class SpecificWorker(GenericWorker):
             sys.exit(0)
 
         # initialize steps
-        start = np.array([currentPose.x/1000, currentPose.z/1000])
-        end = np.array(self.target_pose)
-        step = (np.linalg.norm(end-start) / self.N )
-        for i, L in enumerate(np.arange(0, 1, step)):
-            r = start*(1-L) + end*L
-            self.opti.set_initial(self.X[0, i], r[0])
-            self.opti.set_initial(self.X[1, i], r[1])
+        # start = np.array([currentPose.x/1000, currentPose.z/1000])
+        # end = np.array(self.target_pose)
+        # step = (np.linalg.norm(end-start) / self.N )
+        # for i, L in enumerate(np.arange(0, 1, step)):
+        #     r = start*(1-L) + end*L
+        #     self.opti.set_initial(self.X[0, i], r[0])
+        #     self.opti.set_initial(self.X[1, i], r[1])
 
 
     ######################################################################################################
