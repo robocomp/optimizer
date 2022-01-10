@@ -42,7 +42,7 @@ class SpecificWorker(GenericWorker):
             self.startup_check()
         else:
 
-            self.target_pose = [0, 1]  # meter
+            self.target_pose = [1, 1]  # meter
             self.initialize()
 
             self.timer.timeout.connect(self.compute)
@@ -76,6 +76,8 @@ class SpecificWorker(GenericWorker):
             self.opti.set_initial(self.pos_x[0], currentPose.x/1000)
             self.opti.set_initial(self.pos_y[0], currentPose.z/1000)
             self.opti.set_initial(self.phi[0], currentPose.alpha)
+            self.opti.subject_to(self.pos_x[0] == currentPose.x/1000)
+            self.opti.subject_to(self.pos_y[0] == currentPose.z/1000)
 
             # ---- solve NLP              ------
             p_opts = {"expand": True}
