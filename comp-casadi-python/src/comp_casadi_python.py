@@ -70,8 +70,8 @@ from specificworker import *
 def sigint_handler(*args):
     QtCore.QCoreApplication.quit()
 
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     parser = argparse.ArgumentParser()
     parser.add_argument('iceconfigfile', nargs='?', type=str, default='etc/config')

@@ -5,6 +5,8 @@ from rich.console import Console, Text
 console = Console()
 
 
+Ice.loadSlice("-I ./src/ --all ./src/DifferentialRobot.ice")
+import RoboCompDifferentialRobot
 Ice.loadSlice("-I ./src/ --all ./src/GenericBase.ice")
 import RoboCompGenericBase
 Ice.loadSlice("-I ./src/ --all ./src/Laser.ice")
@@ -87,6 +89,8 @@ class Requires:
     def __init__(self, ice_connector):
         self.ice_connector = ice_connector
         self.mprx={}
+
+        self.DifferentialRobot = self.create_proxy("DifferentialRobotProxy", RoboCompDifferentialRobot.DifferentialRobotPrx)
 
         self.Laser = self.create_proxy("LaserProxy", RoboCompLaser.LaserPrx)
 

@@ -77,7 +77,8 @@ class SpecificWorker(GenericWorker):
     def compute(self):
         print("------------------------")
         try:
-            currentPose = self.omnirobot_proxy.getBaseState()
+            #currentPose = self.omnirobot_proxy.getBaseState()
+            currentPose = self.differentialrobot_proxy.getBaseState()
             current_tr = np.array([currentPose.x/1000, currentPose.z/1000])
             #print(currentPose)
         except:
@@ -111,8 +112,9 @@ class SpecificWorker(GenericWorker):
             # print("Control", int(self.sol.value(self.v_x[0] * 1000)),
             #                  int(self.sol.value(self.v_y[0] * 1000)),
             #                  int(self.sol.value(self.v_rot[0]*200)))
-            print("Control", self.sol.value(self.v_a[0] * 10000000),
-                             self.sol.value(self.v_rot[0] * 200))
+            adv = self.sol.value(self.v_a[0] * 1000)
+            rot = self.sol.value(self.v_rot[0]*10)
+            print("Control", adv, rot)
 
             print(f"First pos {self.sol.value(self.pos_x[1] * 1000):.2f}, {self.sol.value(self.pos_y[2] * 1000):.2f}")
             end = time.time()
@@ -122,15 +124,18 @@ class SpecificWorker(GenericWorker):
             #     self.omnirobot_proxy.setSpeedBase(self.sol.value(self.v_x[0]*40000),
             #                                       self.sol.value(self.v_y[0]*10000),
             #                                       self.sol.value(self.v_rot[0]*200))
-                self.omnirobot_proxy.setSpeedBase(0,
-                                                  self.sol.value(self.v_a[0] * 10000000),
-                                                  self.sol.value(self.v_rot[0] * 200))
+            #     self.omnirobot_proxy.setSpeedBase(0,
+            #                                       self.sol.value(self.v_a[0] * 20000),
+            #                                       self.sol.value(self.v_rot[0] * 200))
+                self.differentialrobot_proxy.setSpeedBase(adv, rot)
+
             except Exception as e: print(e)
 
 
         else:   # at target
             try:
-                self.omnirobot_proxy.setSpeedBase(0, 0, 0)
+                #self.omnirobot_proxy.setSpeedBase(0, 0, 0)
+                self.differentialrobot_proxy.setSpeedBase(0,0,0)
                 self.active = False
                 print("Stopping")
                 sys.exit(0)
@@ -254,11 +259,13 @@ class SpecificWorker(GenericWorker):
         self.opti.set_initial(self.target, self.target_pose)
         self.opti.set_initial(self.T, 1)
 
-        sum_dist = self.opti.variable()
+        #sum_dist = self.opti.variable()
         # self.opti.set_initial(sum_dist, 0)
         # for k in range(self.N - 1):
         #     sum_dist += ca.sumsqr(self.X[0:2, k + 1] - self.X[0:2, k])
-        # self.opti.minimize(ca.sumsqr(self.X[0:2, -1] - self.target_pose))
+
+        self.opti.minimize(ca.sumsqr(self.X[0:2, -1] - self.target_pose))
+
         # +                           ca.sumsqr(self.v_x))  # minimum length
 
         # ---- dynamic constraints for omniwheeled robot --------
@@ -278,8 +285,8 @@ class SpecificWorker(GenericWorker):
             self.opti.subject_to(self.X[:, k + 1] == x_next)  # close the gaps
 
         # ---- control constraints -----------
-        self.opti.subject_to(self.opti.bounded(-0.5, self.v_a, 0.5))  # control is limited meters
-        self.opti.subject_to(self.opti.bounded(-1.5, self.v_rot, 1.5))  # control is limited
+        #self.opti.subject_to(self.opti.bounded(-0.5, self.v_a, 0.5))  # control is limited meters
+        #self.opti.subject_to(self.opti.bounded(-1.5, self.v_rot, 1.5))  # control is limited
 
         # ---- initial point constraints -----------
         self.opti.subject_to(self.pos_x[0] == self.initial[0])

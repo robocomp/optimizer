@@ -1,11 +1,12 @@
 import "OmniRobot.idsl";
 import "Laser.idsl";
+import "DifferentialRobot.idsl";
 
 Component comp_casadi_python
 {
     Communications
     {
-        requires OmniRobot, Laser;
+        requires OmniRobot, Laser, DifferentialRobot;
     };
     language python;
     gui Qt(QWidget);

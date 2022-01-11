@@ -3,4 +3,4 @@ PROJECT(  comp_casadi_python )
 
 INCLUDE( /opt/robocomp/cmake/robocomp.cmake )
 
-ROBOCOMP_IDSL_TO_ICE( CommonBehavior GenericBase Laser OmniRobot )
+ROBOCOMP_IDSL_TO_ICE( CommonBehavior DifferentialRobot GenericBase Laser OmniRobot )

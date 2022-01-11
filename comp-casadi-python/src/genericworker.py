@@ -47,6 +47,7 @@ class GenericWorker(QtWidgets.QWidget):
     def __init__(self, mprx):
         super(GenericWorker, self).__init__()
 
+        self.differentialrobot_proxy = mprx["DifferentialRobotProxy"]
         self.laser_proxy = mprx["LaserProxy"]
         self.omnirobot_proxy = mprx["OmniRobotProxy"]
 
