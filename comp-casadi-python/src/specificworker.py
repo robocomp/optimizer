@@ -18,6 +18,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with RoboComp.  If not, see <http://www.gnu.org/licenses/>.
 #
+import random
 
 from PySide2.QtCore import QTimer
 from PySide2.QtWidgets import QApplication
@@ -55,6 +56,14 @@ class SpecificWorker(GenericWorker):
             self.sol = None
             self.active = True
             self.ant_dist_to_target = 0
+
+            plt.ion()
+            self.fig = plt.figure()
+            self.ax = self.fig.add_subplot(111)
+            x = np.linspace(-1000, 1000, 10)
+            y = np.linspace(-1000, 1000, 10)
+            self.line_plt, = self.ax.plot(x, y, '->')
+            plt.show()
 
             self.timer.timeout.connect(self.compute)
             #self.timer.setSingleShot(True)
@@ -131,6 +140,12 @@ class SpecificWorker(GenericWorker):
 
             except Exception as e: print(e)
 
+            # draw
+            self.line_plt.set_xdata(self.sol.value(self.pos_x*1000))
+            self.line_plt.set_ydata(self.sol.value(self.pos_y*1000))
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+
 
         else:   # at target
             try:
@@ -145,7 +160,7 @@ class SpecificWorker(GenericWorker):
         #plot(sol.value(self.v_y), label="vy")
         #plot(sol.value(self.v_rot), label="vrot")
         #plt.scatter(sol.value(self.pos_x*1000), sol.value(self.pos_y*1000))
-        #plt.plot(sol.value(self.pos_x*1000), sol.value(self.pos_y*1000), '->')
+
         #plt.plot(sol.value(self.v_x * 1000), sol.value(self.v_y * 1000), '->')
         #plot(sol.value(self.pos_x), label="px")
         #plot(sol.value(self.pos_y), label="py")
