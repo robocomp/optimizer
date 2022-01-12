@@ -60,9 +60,10 @@ class SpecificWorker(GenericWorker):
             plt.ion()
             self.fig = plt.figure()
             self.ax = self.fig.add_subplot(111)
-            x = np.linspace(-1000, 1000, 10)
-            y = np.linspace(-1000, 1000, 10)
+            x = np.linspace(-4000, 4000, 10)
+            y = np.linspace(-2000, 2000, 10)
             self.line_plt, = self.ax.plot(x, y, '->')
+            self.ax.plot()
             plt.show()
 
             self.timer.timeout.connect(self.compute)
@@ -104,9 +105,9 @@ class SpecificWorker(GenericWorker):
         if self.active and dist_to_target > 0.15:
 
             # ---- initial values for state ---
-            self.opti.set_initial(self.initial[0], currentPose.x/1000)
-            self.opti.set_initial(self.initial[1], currentPose.z/1000)
-            self.opti.set_initial(self.initial[2], currentPose.alpha)
+            self.opti.set_value(self.initial[0], currentPose.x/1000)
+            self.opti.set_value(self.initial[1], currentPose.z/1000)
+            self.opti.set_value(self.initial[2], currentPose.alpha)
 
             # Warm start
             if self.sol:
@@ -120,9 +121,9 @@ class SpecificWorker(GenericWorker):
             print("Iterations:", self.sol.stats()["iter_count"])
             # print("Control", int(self.sol.value(self.v_x[0] * 1000)),
             #                  int(self.sol.value(self.v_y[0] * 1000)),
-            #                  int(self.sol.value(self.v_rot[0]*200)))
-            adv = self.sol.value(self.v_a[0] * 1000)
-            rot = self.sol.value(self.v_rot[0]*10)
+            #                  int(self.sol.value(self.v_rot[0])))
+            adv = self.sol.value(self.v_a[0]*1000)
+            rot = self.sol.value(self.v_rot[0])
             print("Control", adv, rot)
 
             print(f"First pos {self.sol.value(self.pos_x[1] * 1000):.2f}, {self.sol.value(self.pos_y[2] * 1000):.2f}")
@@ -150,7 +151,7 @@ class SpecificWorker(GenericWorker):
         else:   # at target
             try:
                 #self.omnirobot_proxy.setSpeedBase(0, 0, 0)
-                self.differentialrobot_proxy.setSpeedBase(0,0,0)
+                self.differentialrobot_proxy.setSpeedBase(0, 0, 0)
                 self.active = False
                 print("Stopping")
                 sys.exit(0)
@@ -267,11 +268,12 @@ class SpecificWorker(GenericWorker):
         self.v_rot = self.U[1, :]
 
         self.T = self.opti.variable()  # final time
-        self.target = self.opti.variable(2)
-        self.initial = self.opti.variable(3)
+        self.target = self.opti.parameter(2)
+        self.initial = self.opti.parameter(3)
 
         # ---- cost function          ---------
-        self.opti.set_initial(self.target, self.target_pose)
+        self.opti.set_value(self.target, self.target_pose)
+        self.opti.set_value(self.initial, [0.0, 0.0, 0.0])
         self.opti.set_initial(self.T, 1)
 
         #sum_dist = self.opti.variable()
@@ -289,7 +291,7 @@ class SpecificWorker(GenericWorker):
                                     ca.horzcat(ca.sin(x[2]), 0),
                                     ca.horzcat(0,            1)) @ u
 
-        dt = self.T / self.N  # length of a control interval
+        dt = 1.0 / self.N  # length of a control interval
         for k in range(self.N):  # loop over control intervals
             # Runge-Kutta 4 integration
             k1 = f(self.X[:, k], self.U[:, k])
@@ -300,8 +302,8 @@ class SpecificWorker(GenericWorker):
             self.opti.subject_to(self.X[:, k + 1] == x_next)  # close the gaps
 
         # ---- control constraints -----------
-        #self.opti.subject_to(self.opti.bounded(-0.5, self.v_a, 0.5))  # control is limited meters
-        #self.opti.subject_to(self.opti.bounded(-1.5, self.v_rot, 1.5))  # control is limited
+        self.opti.subject_to(self.opti.bounded(-0.5, self.v_a, 0.5))  # control is limited meters
+        self.opti.subject_to(self.opti.bounded(-1.5, self.v_rot, 1.5))  # control is limited
 
         # ---- initial point constraints -----------
         self.opti.subject_to(self.pos_x[0] == self.initial[0])
