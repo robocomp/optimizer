@@ -39,7 +39,7 @@ class SpecificWorker(GenericWorker):
     def __init__(self, proxy_map, startup_check=False):
         super(SpecificWorker, self).__init__(proxy_map)
 
-        self.N = 20  # epoch size
+        self.N = 10  # epoch size
         self.target_pose = [0, 1]
         self.initialize_differential()
 
@@ -59,7 +59,7 @@ class SpecificWorker(GenericWorker):
         self.ax = self.fig.add_subplot(111)
         x = np.linspace(-4000, 4000, self.N+1)
         y = np.linspace(-2000, 2000, self.N+1)
-        self.line_plt, = self.ax.plot(x, y)
+        self.line_plt, = self.ax.plot(x, y, '*')
         #self.line_plt = self.ax.quiver(x, y, self.u, self.v)
 
         target_circle = plt.Circle((self.target_pose[0] * 1000, self.target_pose[1] * 1000), 100, color='blue')
@@ -67,7 +67,7 @@ class SpecificWorker(GenericWorker):
         self.ax.plot()
         plt.show()
 
-        self.Period = 200
+        self.Period = 100
         if startup_check:
             self.startup_check()
         else:
@@ -143,7 +143,7 @@ class SpecificWorker(GenericWorker):
             #     self.omnirobot_proxy.setSpeedBase(0,
             #                                       self.sol.value(self.v_a[0] * 20000),
             #                                       self.sol.value(self.v_rot[0] * 200))
-                #self.differentialrobot_proxy.setSpeedBase(adv, rot)
+                self.differentialrobot_proxy.setSpeedBase(adv, rot)
                 pass
 
             except Exception as e: print(e)
@@ -286,32 +286,33 @@ class SpecificWorker(GenericWorker):
         self.v_a = self.U[0, :]
         self.v_rot = self.U[1, :]
 
-        self.T = self.opti.variable()  # final time
+        #self.T = self.opti.variable()  # final time
         self.target_oparam = self.opti.parameter(2)
         self.initial_oparam = self.opti.parameter(3)
 
         # ---- cost function          ---------
         self.opti.set_value(self.target_oparam, self.target_pose)
         self.opti.set_value(self.initial_oparam, [0.0, 0.0, 0.0])
-        self.opti.set_initial(self.T, 1)
+        #self.opti.set_initial(self.T, 1)
 
         #sum_dist = self.opti.variable()
         # self.opti.set_initial(sum_dist, 0)
         # for k in range(self.N - 1):
         #     sum_dist += ca.sumsqr(self.X[0:2, k + 1] - self.X[0:2, k])
 
-        self.opti.minimize(ca.sumsqr(self.X[0:2, -1] - self.target_oparam)
-                           + 0.01 * ca.sumsqr(self.v_rot)
-                           + ca.sumsqr(self.v_a))
+        # self.opti.minimize(ca.sumsqr(self.X[0:2, -1] - self.target_oparam)
+        #                    + 0.01 * ca.sumsqr(self.v_rot)
+        #                    + ca.sumsqr(self.v_a))
+        self.opti.minimize(ca.sumsqr(self.v_rot) + ca.sumsqr(self.v_a))
 
         # ---- dynamic constraints for differential robot --------
         # dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
-        f = lambda x, u: ca.vertcat(ca.horzcat(ca.cos(x[2]), 0),
-                                    ca.horzcat(ca.sin(x[2]), 0),
+        f = lambda x, u: ca.vertcat(ca.horzcat(ca.sin(x[2]), 0),
+                                    ca.horzcat(ca.cos(x[2]), 0),
                                     ca.horzcat(0,            1)) @ u
 
         dt = 1.0 / self.N  # length of a control interval
-        dt = 1.0
+        #dt = 0.1   # timer interval in secs
         for k in range(self.N):  # loop over control intervals
             # Runge-Kutta 4 integration
             k1 = f(self.X[:, k], self.U[:, k])
@@ -324,7 +325,7 @@ class SpecificWorker(GenericWorker):
 
         # ---- control constraints -----------
         self.opti.subject_to(self.opti.bounded(-0.5, self.v_a, 0.5))  # control is limited meters
-        self.opti.subject_to(self.opti.bounded(-1.0, self.v_rot, 1.0))  # control is limited
+        self.opti.subject_to(self.opti.bounded(-1, self.v_rot, 1))  # control is limited
 
         # ---- initial point constraints -----------
         self.opti.subject_to(self.pos_x[0] == self.initial_oparam[0])
@@ -332,8 +333,8 @@ class SpecificWorker(GenericWorker):
         self.opti.subject_to(self.phi[0] == self.initial_oparam[2])
 
         # ---- target point constraints -----------
-        # self.opti.subject_to(self.pos_x[-1] == self.target[0])
-        # self.opti.subject_to(self.pos_y[-1] == self.target[1])
+        self.opti.subject_to(self.pos_x[-1] == self.target_oparam[0])
+        self.opti.subject_to(self.pos_y[-1] == self.target_oparam[1])
 
     ######################################################################################################
     def startup_check(self):
