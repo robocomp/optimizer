@@ -1,7 +1,7 @@
 # Proxies for required interfaces
 LaserProxy = laser:tcp -h localhost -p 10003
-#OmniRobotProxy = omnirobot:tcp -h localhost -p 10004
-DifferentialRobotProxy = differentialrobot:tcp -h localhost -p 10004
+OmniRobotProxy = omnirobot:tcp -h localhost -p 10004
+#DifferentialRobotProxy = differentialrobot:tcp -h localhost -p 10004
 
 
 Ice.Warn.Connections=0
