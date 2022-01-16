@@ -29,8 +29,10 @@ import numpy as np
 import casadi as ca
 import sys, time
 from loguru import logger
-from pylab import plot, step, figure, legend, show, spy
 import matplotlib.pyplot as plt
+from rdp import rdp
+from ground.base import get_context
+from sect.triangulation import Triangulation
 
 sys.path.append('/opt/robocomp/lib')
 console = Console(highlight=False)
@@ -42,10 +44,9 @@ class SpecificWorker(GenericWorker):
         self.N = 12  # epoch size
         self.align_point = self.N//3
         self.target_pose = [0, 1]
-#        self.initialize_differential()
-        self.initialize_omni()
+        self.initialize_differential()
+#        self.initialize_omni()
 
-        # p_opts = {"expand": True}
         p_opts = {}
         s_opts = {"max_iter": 10000,
                   'print_level': 0,
@@ -59,13 +60,15 @@ class SpecificWorker(GenericWorker):
         plt.ion()
         self.fig = plt.figure()
         self.ax = self.fig.add_subplot(111)
-        x = np.linspace(-4000, 4000, self.N+1)
-        y = np.linspace(-2000, 2000, self.N+1)
+        x = np.linspace(-5000, 5000, self.N+1)
+        y = np.linspace(-2500, 2500, self.N+1)
         self.line_plt, = self.ax.plot(x, y, '*')
         #self.line_plt = self.ax.quiver(x, y, self.u, self.v)
-
+        self.line_laser, = self.ax.plot(x, y)
         target_circle = plt.Circle((self.target_pose[0] * 1000, self.target_pose[1] * 1000), 100, color='blue')
         self.origin_circle = self.ax.add_patch(target_circle)
+        robot_square = plt.Rectangle((self.target_pose[0] * 1000, self.target_pose[1] * 1000), 400, 400, color='green')
+        self.robot_square = self.ax.add_patch(robot_square)
         self.ax.plot()
         plt.show()
 
@@ -76,36 +79,26 @@ class SpecificWorker(GenericWorker):
             self.timer.timeout.connect(self.compute)
             #self.timer.setSingleShot(True)
             self.timer.start(self.Period)
-            # self.advance = []
-            # self.rotation = []
-            # self.compute()
-            # for adv, rot in zip(self.advance, self.rotation):
-            #     self.differentialrobot_proxy.setSpeedBase(adv, rot)
-            #     time.sleep(1)
-            # self.differentialrobot_proxy.setSpeedBase(0,0)
 
     def __del__(self):
         """Destructor"""
 
     def setParams(self, params):
-        # try:
-        #	self.innermodel = InnerModel(params["InnerModelPath"])
-        # except:
-        #	traceback.print_exc()
-        #	print("Error reading config params")
         return True
-
 
     @QtCore.Slot()
     @logger.catch
     def compute(self):
         print("------------------------")
         try:
-            currentPose = self.omnirobot_proxy.getBaseState()
-            #currentPose = self.differentialrobot_proxy.getBaseState()
+            #currentPose = self.omnirobot_proxy.getBaseState()
+            currentPose = self.differentialrobot_proxy.getBaseState()
             current_tr = np.array([currentPose.x/1000, currentPose.z/1000])
         except:
             print("Error connecting to base")
+
+        # laser
+        laser_poly_robot, laser_poly_world = self.read_laser(currentPose)
 
         start = time.time()
         dist_to_target = np.linalg.norm(current_tr - self.target_pose)
@@ -118,51 +111,61 @@ class SpecificWorker(GenericWorker):
         if self.active and dist_to_target > 0.15:
 
             # ---- initial values for state ---
-            self.opti.set_value(self.initial_oparam[0], currentPose.x/1000)
-            self.opti.set_value(self.initial_oparam[1], currentPose.z/1000)
-            self.opti.set_value(self.initial_oparam[2], currentPose.alpha)
-            self.opti.set_value(self.target_oparam, self.target_pose)  # se puede quitar creo
+            self.opti.set_value(self.initial_oparam[0], 0)
+            self.opti.set_value(self.initial_oparam[1], 0)
+            self.opti.set_value(self.initial_oparam[2], 0)
+            R = np.array([[np.cos(currentPose.alpha), -np.sin(currentPose.alpha)],
+                          [np.sin(currentPose.alpha), np.cos(currentPose.alpha)]])
+            target_in_robot = R.transpose() @ (self.target_pose-current_tr)
+            self.opti.set_value(self.target_oparam, target_in_robot)
 
             # Warm start
             if self.sol:
                 for i in range(1, self.N):
                     self.opti.set_initial(self.X[:, i], self.sol.value(self.X[:, i]))
 
-
             # ---- solve NLP ------
             self.sol = self.opti.solve()
 
             # ---- print output -----
             print("Iterations:", self.sol.stats()["iter_count"])
-            # print("Control", int(self.sol.value(self.v_x[0] * 1000)),
-            #                  int(self.sol.value(self.v_y[0] * 1000)),
-            #                  int(self.sol.value(self.v_rot[0])))
-            #adv = self.sol.value(self.v_a[0]*1000)
-            #rot = self.sol.value(self.v_rot[0])
-            #print("Control", adv, rot)
-            #self.advance = self.sol.value(self.v_a*1000)
-            #self.rotation = rot = self.sol.value(self.v_rot)
+            adv = self.sol.value(self.v_a[0]*1000)
+            rot = self.sol.value(self.v_rot[0])
+            self.advance = self.sol.value(self.v_a*1000)
+            self.rotation = self.sol.value(self.v_rot)
 
             # update self.vect to the desired rotation value at point P
             vect = self.sol.value(self.X[0:2, self.align_point+1]) - self.sol.value(self.X[0:2, self.align_point-1])
-            #self.opti.set_value(self.vect, np.arctan2(vect[0], vect[1]))
-
-            print(f"First pos {self.sol.value(self.pos_x[1] * 1000):.2f}, {self.sol.value(self.pos_y[2] * 1000):.2f}")
             end = time.time()
             print(f"Elapsed: {end-start:.2f}")
             # move the robot
             try:
-                self.omnirobot_proxy.setSpeedBase( self.sol.value(self.v_x[0]*1000),
-                                                   self.sol.value(self.v_y[0]*1000),
-                                                   self.sol.value(self.v_rot[0]))
-                #self.differentialrobot_proxy.setSpeedBase(adv, rot)
+                # self.omnirobot_proxy.setSpeedBase( self.sol.value(self.v_x[0]*1000),
+                #                                    self.sol.value(self.v_y[0]*1000),
+                #                                    self.sol.value(self.v_rot[0]))
+                print("Control", adv, rot)
+                self.differentialrobot_proxy.setSpeedBase(adv, rot)
                 pass
-
-            except Exception as e: print(e)
+            except Exception as e:
+                print(e)
 
             # draw
-            self.line_plt.set_xdata(self.sol.value(self.pos_x*1000))
-            self.line_plt.set_ydata(self.sol.value(self.pos_y*1000))
+            xs = self.sol.value(self.pos_x * 1000)
+            ys = self.sol.value(self.pos_y * 1000)
+            path_in_world = R @ np.array([xs, ys])
+            for i in range(path_in_world.shape[1]):
+                path_in_world[:, i] = path_in_world[:, i] + current_tr*1000
+            self.line_plt.set_xdata(path_in_world[0, :])
+            self.line_plt.set_ydata(path_in_world[1, :])
+            # draw laser
+            self.line_laser.set_xdata(laser_poly_world[:, 0])
+            self.line_laser.set_ydata(laser_poly_world[:, 1])
+            # draw convex polys
+
+            # draw robot
+            self.robot_square.remove()
+            self.robot_square = self.ax.add_patch(plt.Rectangle(current_tr*1000-[150, 250], 300, 500,
+                                                                color='green', angle=np.rad2deg(currentPose.alpha)))
             # self.ax.clear()
             # target_circle = plt.Circle((self.target_pose[0] * 1000, self.target_pose[1] * 1000), 100, color='blue')
             # self.ax.add_patch(target_circle)
@@ -179,11 +182,10 @@ class SpecificWorker(GenericWorker):
             self.fig.canvas.draw()
             self.fig.canvas.flush_events()
 
-
         else:   # at target
             try:
-                self.omnirobot_proxy.setSpeedBase(0, 0, 0)
-                #self.differentialrobot_proxy.setSpeedBase(0, 0)
+                #self.omnirobot_proxy.setSpeedBase(0, 0, 0)
+                self.differentialrobot_proxy.setSpeedBase(0, 0)
                 self.active = False
                 print("Stopping")
                 sys.exit(0)
@@ -200,6 +202,33 @@ class SpecificWorker(GenericWorker):
         #legend(loc="upper left")
         #show()
 
+    def read_laser(self, rpose):
+        ldata_robot = [[0, 0]]
+        ldata_world = []
+        try:
+            ld = self.laser_proxy.getLaserData()
+            # laser tips in robot's RS
+            ldata_robot.extend([[l.dist*np.sin(l.angle), l.dist*np.cos(l.angle)] for l in ld if l.dist > 0])
+            ldata_robot.append([0,0])
+            ldata_robot = np.array(rdp(ldata_robot, epsilon=100))
+            # laser tips in world's RS
+            a = rpose.alpha
+            r = np.array([rpose.x, rpose.z])
+            R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+            ldata_world = [R@l + r for l in ldata_robot]
+            # convexify
+            context = get_context()
+            Contour, Point, Polygon = context.contour_cls, context.point_cls, context.polygon_cls
+            poly = Polygon(Contour([Point(point[0], point[1]) for point in ldata_world]), [])
+            res = Triangulation.constrained_delaunay(poly, context=context).triangles()
+            #print("Convex polygons", len(res))
+            for cont in res:
+                for p in cont.vertices:
+                    ldata_world.append([p.x, p.y])
+
+        except Exception as e:
+            print(e)
+        return ldata_robot, np.array(ldata_world)
 
     #@logger.catch
     def initialize_omni(self):
@@ -316,7 +345,7 @@ class SpecificWorker(GenericWorker):
                                     ca.horzcat(0,            1)) @ u
 
         dt = 1.0 / self.N  # length of a control interval
-        dt = 0.1   # timer interval in secs
+        dt = 1   # timer interval in secs
         for k in range(self.N):  # loop over control intervals
             # Runge-Kutta 4 integration
             k1 = f(self.X[:, k], self.U[:, k])
