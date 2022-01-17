@@ -30,6 +30,7 @@ import casadi as ca
 import sys, time
 from loguru import logger
 import matplotlib.pyplot as plt
+import math
 from rdp import rdp
 from ground.base import get_context
 from sect.triangulation import Triangulation
@@ -368,6 +369,25 @@ class SpecificWorker(GenericWorker):
         # ---- target point constraints -----------
         self.opti.subject_to(self.pos_x[-1] == self.target_oparam[0])
         self.opti.subject_to(self.pos_y[-1] == self.target_oparam[1])
+
+        # #obstacles
+        # DW = 0.3
+        # DL = 0.3
+        # desp = [(0, 0), (-DW, -DL), (-DW, DL), (DW, -DL), (DW, DL), (0, -DL), (0, DL), (-DW, 0), (DW, 0)]
+        # obs_points = [(-0.5, 0.5), (0.5, 0.5), (0.5, -0.5), (-0.5, -0.5)] #transform to robot SR
+
+        # for d in desp:
+        #     for i in range(len(obs_points)):
+        #         p1 = obs_points[i]
+        #         p2 = obs_points[(i+1)%len(obs_points)]
+        #         norm = math.sqrt((p1(1)-p2(1))^2 + (p1(0)-p2(0))^2)
+        #         A = (p1(1) - p2(1))/norm
+        #         B = (p2(0) - p1(0))/norm
+        #         C = -((p1(1) - p2(1))*p1(0) + (p2(0) - p1(0))*p1(1))/norm
+        #         self.opti.subject_to(d(0)*A + d(1)*B + C >= 0)  
+
+            
+
 
     ######################################################################################################
     def startup_check(self):
