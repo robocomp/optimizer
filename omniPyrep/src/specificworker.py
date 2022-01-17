@@ -234,7 +234,7 @@ class SpecificWorker(GenericWorker):
 
         #self.speed_robot = self.convert_base_speed_to_radians(adv, adv, rot)
         converted = self.convert_base_speed_to_radians(adv, side, rot)
-        #print("Joystick ", converted)
+        # print("Joystick ", converted)
         self.robot.set_base_angular_velocites(converted)
 
     def convert_base_speed_to_radians(self, adv, side, rot):
