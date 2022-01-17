@@ -2,7 +2,7 @@ import "OmniRobot.idsl";
 import "Laser.idsl";
 import "DifferentialRobot.idsl";
 
-Component comp_casadi_python
+Component comp_casadi_cpp
 {
     Communications
     {

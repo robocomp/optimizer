@@ -28,7 +28,7 @@
 #define SPECIFICWORKER_H
 
 #include <genericworker.h>
-#include <innermodel/innermodel.h>
+#include <Eigen/Dense>
 
 class SpecificWorker : public GenericWorker
 {
@@ -44,10 +44,11 @@ public slots:
 	void compute();
 	int startup_check();
 	void initialize(int period);
+
 private:
-	std::shared_ptr < InnerModel > innerModel;
 	bool startup_check_flag;
 
+    std::tuple<QPolygonF, QPolygonF> read_laser(const RoboCompGenericBase::TBaseState &pose);
 };
 
 #endif

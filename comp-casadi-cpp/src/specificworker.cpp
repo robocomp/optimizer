@@ -16,7 +16,9 @@
  *    You should have received a copy of the GNU General Public License
  *    along with RoboComp.  If not, see <http://www.gnu.org/licenses/>.
  */
+
 #include "specificworker.h"
+#include <Eigen/Dense>
 
 /**
 * \brief Default constructor
@@ -36,19 +38,6 @@ SpecificWorker::~SpecificWorker()
 
 bool SpecificWorker::setParams(RoboCompCommonBehavior::ParameterList params)
 {
-//	THE FOLLOWING IS JUST AN EXAMPLE
-//	To use innerModelPath parameter you should uncomment specificmonitor.cpp readConfig method content
-//	try
-//	{
-//		RoboCompCommonBehavior::Parameter par = params.at("InnerModelPath");
-//		std::string innermodel_path = par.value;
-//		innerModel = std::make_shared(innermodel_path);
-//	}
-//	catch(const std::exception &e) { qFatal("Error reading config params"); }
-
-
-
-
 
 
 	return true;
@@ -71,22 +60,29 @@ void SpecificWorker::initialize(int period)
 
 void SpecificWorker::compute()
 {
-	//computeCODE
-	//QMutexLocker locker(mutex);
-	//try
-	//{
-	//  camera_proxy->getYImage(0,img, cState, bState);
-	//  memcpy(image_gray.data, &img[0], m_width*m_height*sizeof(uchar));
-	//  searchTags(image_gray);
-	//}
-	//catch(const Ice::Exception &e)
-	//{
-	//  std::cout << "Error reading from Camera" << e << std::endl;
-	//}
-	
-	
+    qInfo() << "------------------------";
+    RoboCompGenericBase::TBaseState current_pose;
+    try
+    {
+        //currentPose = self.omnirobot_proxy.getBaseState()
+        differentialrobot_proxy->getBaseState(current_pose);
+        auto current_tr = Eigen::Vector2d(current_pose.x / 1000, current_pose.z / 1000);
+    }
+    catch(const Ice::Exception &e){ qInfo() << "Error connecting to base"; std::cout << e.what() << std::endl;}
+
+    // laser
+    auto &&[laser_poly_robot, laser_poly_world] = read_laser(current_pose);
+
+
 }
 
+std::tuple<QPolygonF, QPolygonF> SpecificWorker::read_laser(const RoboCompGenericBase::TBaseState &pose)
+{
+    QPolygonF poly_robot, poly_world;
+    return std::make_tuple(poly_robot, poly_world);
+}
+
+/****************************************/
 int SpecificWorker::startup_check()
 {
 	std::cout << "Startup check" << std::endl;
