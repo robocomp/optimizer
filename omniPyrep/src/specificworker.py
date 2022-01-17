@@ -21,23 +21,15 @@
 
 from genericworker import *
 import os, time, queue
-from bisect import bisect_left
-from os.path import dirname, join, abspath
 from pyrep import PyRep
-#from pyrep.robots.mobiles.viriato import Viriato
-#from pyrep.robots.mobiles.viriato import Viriato
 from pyrep.robots.mobiles.youbot import YouBot
 from pyrep.objects.vision_sensor import VisionSensor
 from pyrep.objects.dummy import Dummy
 from pyrep.objects.shape import Shape
-from pyrep.objects.shape import Object
-from pyrep.objects.joint import Joint
-
+import itertools as it
 import numpy as np
 import numpy_indexed as npi
-from itertools import zip_longest
-import cv2
-import queue
+
 
 class SpecificWorker(GenericWorker):
     def __init__(self, proxy_map):
@@ -83,7 +75,7 @@ class SpecificWorker(GenericWorker):
         start = time.time()
         while True:
             self.pr.step()
-            self.read_laser()
+            self.ldata = self.read_laser()
             self.read_joystick()
             self.read_robot_pose()
             self.move_robot()
@@ -100,16 +92,18 @@ class SpecificWorker(GenericWorker):
     ###########################################
     ### LASER get and publish laser data
     ###########################################
-    def read_laser(self):
-        self.ldata = self.compute_omni_laser([self.hokuyo_base_front_right,
-                                         self.hokuyo_base_front_left,
-                                         self.hokuyo_base_back_left,
-                                         self.hokuyo_base_back_right
-                                         ], self.robot)
-        try:
-            self.laserpub_proxy.pushLaserData(self.ldata)
-        except Ice.Exception as e:
-            print(e)
+    #def read_laser(self):
+
+        # self.ldata = self.compute_omni_laser([self.hokuyo_base_front_right,
+        #                                  self.hokuyo_base_front_left,
+        #                                  self.hokuyo_base_back_left,
+        #                                  self.hokuyo_base_back_right
+        #                                  ], self.robot)
+
+        # try:
+        #     self.laserpub_proxy.pushLaserData(self.ldata)
+        # except Ice.Exception as e:
+        #     print(e)
 
     ###########################################
     ### JOYSITCK read and move the robot
@@ -158,42 +152,71 @@ class SpecificWorker(GenericWorker):
     ########################################
     ## General laser computation
     ########################################
-    def compute_omni_laser(self, lasers, robot):
-        c_data = []
-        coor = []
-        for laser in lasers:
-            semiwidth = laser.get_resolution()[0]/2
-            semiangle = np.radians(laser.get_perspective_angle()/2)
-            focal = semiwidth/np.tan(semiangle)
-            data = laser.capture_depth(in_meters=True)
-            m = laser.get_matrix(robot)     # these data should be read first
-            if type(m) != list:
-                m = [item for sublist in m for item in sublist]
-            imat = np.array(
-                [[m[0], m[1], m[2], m[3]], [m[4], m[5], m[6], m[7]], [m[8], m[9], m[10], m[11]], [0, 0, 0, 1]])
+    def read_laser(self):
+        ldata = []
+        data = self.pr.script_call("get_depth_data@hokuyo_base_front", 1)
+        if len(data[1]) > 0:
+            polar = np.zeros(shape=(int(len(data[1]) / 3), 2))
+            i = 0
+            for x, y, z in self.grouper(data[1], 3):  # extract non-intersecting groups of 3
+                polar[i] = [-np.arctan2(y, x), np.linalg.norm([x, y])]  # add to list in polar coordinates
+                i += 1
 
-            for i,d in enumerate(data.T):
-                z = d[0]        # min if more than one row in depth image
-                vec = np.array([-(i-semiwidth)*z/focal, 0, z, 1])
-                res = imat.dot(vec)[:3]       # translate to robot's origin, homogeneous
-                c_data.append([np.arctan2(res[0], res[1]), np.linalg.norm(res)])  # add to list in polar coordinates
-
-        # create 360 polar rep
-        c_data_np = np.asarray(c_data)
-        angles = np.linspace(-np.pi, np.pi, 360)                          # create regular angular values
-        positions = np.searchsorted(angles, c_data_np[:,0])               # list of closest position for each laser meas
-        ldata = [RoboCompLaser.TData(a, 0) for a in angles]               # create empty 360 angle array
-        pos , medians  = npi.group_by(positions).median(c_data_np[:,1])   # group by repeated positions
-        for p, m in zip_longest(pos, medians):                            # fill the angles with measures
-            ldata[p].dist = int(m*1000)   # to millimeters
-        if ldata[0] == 0:
-            ldata[0] = 200       #half robot width
-        for i in range(0, len(ldata)):
-            if ldata[i].dist == 0:
-                ldata[i].dist = ldata[i-1].dist
-        #ldata[0].dist = ldata[len(data)-1].dist
-
+            angles = np.linspace(-np.radians(120), np.radians(120), 360)  # create regular angular values
+            positions = np.searchsorted(angles,
+                                        polar[:, 0])  # list of closest position in polar for each laser measurement
+            ldata = [RoboCompLaser.TData(a, 0) for a in angles]  # create empty 360 angle array
+            pos, medians = npi.group_by(positions).median(polar[:, 1])  # group by repeated positions
+            for p, m in it.zip_longest(pos, medians):  # fill the angles with measures
+                if p < len(ldata):
+                    ldata[p].dist = int(m * 1000)  # to millimeters
+            if ldata[0].dist == 0:
+                ldata[0].dist = 200  # half robot width
+            for i in range(0, len(ldata)):
+                if ldata[1].dist == 0:
+                    ldata[i].dist = ldata[i - 1].dist
         return ldata
+
+
+    def grouper(self, inputs, n, fillvalue=None):
+        iters = [iter(inputs)] * n
+        return it.zip_longest(*iters, fillvalue=fillvalue)
+    # def compute_omni_laser(self, lasers, robot):
+    #     c_data = []
+    #     coor = []
+    #     for laser in lasers:
+    #         semiwidth = laser.get_resolution()[0]/2
+    #         semiangle = np.radians(laser.get_perspective_angle()/2)
+    #         focal = semiwidth/np.tan(semiangle)
+    #         data = laser.capture_depth(in_meters=True)
+    #         m = laser.get_matrix(robot)     # these data should be read first
+    #         if type(m) != list:
+    #             m = [item for sublist in m for item in sublist]
+    #         imat = np.array(
+    #             [[m[0], m[1], m[2], m[3]], [m[4], m[5], m[6], m[7]], [m[8], m[9], m[10], m[11]], [0, 0, 0, 1]])
+    #
+    #         for i,d in enumerate(data.T):
+    #             z = d[0]        # min if more than one row in depth image
+    #             vec = np.array([-(i-semiwidth)*z/focal, 0, z, 1])
+    #             res = imat.dot(vec)[:3]       # translate to robot's origin, homogeneous
+    #             c_data.append([np.arctan2(res[0], res[1]), np.linalg.norm(res)])  # add to list in polar coordinates
+    #
+    #     # create 360 polar rep
+    #     c_data_np = np.asarray(c_data)
+    #     angles = np.linspace(-np.pi, np.pi, 360)                          # create regular angular values
+    #     positions = np.searchsorted(angles, c_data_np[:,0])               # list of closest position for each laser meas
+    #     ldata = [RoboCompLaser.TData(a, 0) for a in angles]               # create empty 360 angle array
+    #     pos , medians  = npi.group_by(positions).median(c_data_np[:,1])   # group by repeated positions
+    #     for p, m in zip_longest(pos, medians):                            # fill the angles with measures
+    #         ldata[p].dist = int(m*1000)   # to millimeters
+    #     if ldata[0] == 0:
+    #         ldata[0] = 200       #half robot width
+    #     for i in range(0, len(ldata)):
+    #         if ldata[i].dist == 0:
+    #             ldata[i].dist = ldata[i-1].dist
+    #     #ldata[0].dist = ldata[len(data)-1].dist
+    #
+    #     return ldata
     
     def update_joystick(self, datos):
         adv = 0.0
