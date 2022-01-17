@@ -110,7 +110,7 @@ class SpecificWorker(GenericWorker):
         print(f"Target pose:, {self.target_pose[0]:.2f}, {self.target_pose[1]:.2f}")
 
         if self.active and dist_to_target > 0.15:
-
+            
             # ---- initial values for state ---
             self.opti.set_value(self.initial_oparam[0], 0)
             self.opti.set_value(self.initial_oparam[1], 0)
@@ -124,6 +124,17 @@ class SpecificWorker(GenericWorker):
             if self.sol:
                 for i in range(1, self.N):
                     self.opti.set_initial(self.X[:, i], self.sol.value(self.X[:, i]))
+
+            # Obstacles
+            obs_points = [(-0.5, 0.5), (0.5, 0.5), (0.5, -0.5), (-0.5, -0.5)] #transform to robot SR
+            obs_points_in_robotSR = list
+            for p in obs_points:
+                pT = R.transpose() @ (np.array([p(0), p(1)])-current_tr)
+                obs_points_in_robotSR.append((pT[0], pT[1])
+            lines = self.points2lines(obs_points_in_robotSR)
+            for l in lines:
+                self.opti.set_value(self.obs_lines[i], np.array([l(0), l(1), l(2)]))
+
 
             # ---- solve NLP ------
             self.sol = self.opti.solve()
@@ -323,6 +334,11 @@ class SpecificWorker(GenericWorker):
         self.target_oparam = self.opti.parameter(2)
         self.initial_oparam = self.opti.parameter(3)
 
+        self.obs_lines=list
+        for i in range(4):
+            self.obs_lines.append(self.opti.parameter(3))
+
+
         # ---- cost function          ---------
         self.opti.set_value(self.target_oparam, self.target_pose)
         self.opti.set_value(self.initial_oparam, [0.0, 0.0, 0.0])
@@ -370,23 +386,30 @@ class SpecificWorker(GenericWorker):
         self.opti.subject_to(self.pos_x[-1] == self.target_oparam[0])
         self.opti.subject_to(self.pos_y[-1] == self.target_oparam[1])
 
-        # #obstacles
-        # DW = 0.3
-        # DL = 0.3
-        # desp = [(0, 0), (-DW, -DL), (-DW, DL), (DW, -DL), (DW, DL), (0, -DL), (0, DL), (-DW, 0), (DW, 0)]
-        # obs_points = [(-0.5, 0.5), (0.5, 0.5), (0.5, -0.5), (-0.5, -0.5)] #transform to robot SR
+        #obstacles
+        DW = 0.3
+        DL = 0.3
+        desp = [(0, 0), (-DW, -DL), (-DW, DL), (DW, -DL), (DW, DL), (0, -DL), (0, DL), (-DW, 0), (DW, 0)]
 
-        # for d in desp:
-        #     for i in range(len(obs_points)):
-        #         p1 = obs_points[i]
-        #         p2 = obs_points[(i+1)%len(obs_points)]
-        #         norm = math.sqrt((p1(1)-p2(1))^2 + (p1(0)-p2(0))^2)
-        #         A = (p1(1) - p2(1))/norm
-        #         B = (p2(0) - p1(0))/norm
-        #         C = -((p1(1) - p2(1))*p1(0) + (p2(0) - p1(0))*p1(1))/norm
-        #         self.opti.subject_to(d(0)*A + d(1)*B + C >= 0)  
+        for d in desp:
+            for l in self.obs_lines:
+                self.opti.subject_to(d(0)*l[0] + d(1)*l[1] + l[2] >= 0)  
 
             
+    def points2lines(self, obs_points):
+        obs_lines = list
+        for i in range(len(obs_points)):
+            p1 = obs_points[i]
+            p2 = obs_points[(i+1)%len(obs_points)]
+            norm = math.sqrt((p1(1)-p2(1))^2 + (p1(0)-p2(0))^2)
+            line = list
+            line.append((p1(1) - p2(1))/norm)  # A
+            line.append((p2(0) - p1(0))/norm)  # B
+            line.append(-((p1(1) - p2(1))*p1(0) + (p2(0) - p1(0))*p1(1))/norm)  #C
+            obs_lines.append(line)
+        return obs_lines
+
+
 
 
     ######################################################################################################
