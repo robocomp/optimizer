@@ -126,14 +126,15 @@ class SpecificWorker(GenericWorker):
                     self.opti.set_initial(self.X[:, i], self.sol.value(self.X[:, i]))
 
             # Obstacles
-            obs_points = [(-0.5, 0.5), (0.5, 0.5), (0.5, -0.5), (-0.5, -0.5)] #transform to robot SR
-            obs_points_in_robotSR = list
-            for p in obs_points:
-                pT = R.transpose() @ (np.array([p(0), p(1)])-current_tr)
-                obs_points_in_robotSR.append((pT[0], pT[1])
-            lines = self.points2lines(obs_points_in_robotSR)
-            for l in lines:
-                self.opti.set_value(self.obs_lines[i], np.array([l(0), l(1), l(2)]))
+            # obs_points = [np.array([-0.5, 0.5]), np.array([0.5, 0.5]), np.array([0.5, -0.5]), np.array([-0.5, -0.5])] #transform to robot SR
+            # obs_points_in_robotSR = [np.array(2)]*4
+            # for i, p in enumerate(obs_points):
+            #     pT = R.transpose() @ (p-current_tr)
+            #     obs_points_in_robotSR[i] = (pT)
+
+            # lines = self.points2lines(obs_points_in_robotSR)
+            # for l in lines:
+            #     self.opti.set_value(self.obs_lines[i], l)
 
 
             # ---- solve NLP ------
@@ -334,9 +335,9 @@ class SpecificWorker(GenericWorker):
         self.target_oparam = self.opti.parameter(2)
         self.initial_oparam = self.opti.parameter(3)
 
-        self.obs_lines=list
-        for i in range(4):
-            self.obs_lines.append(self.opti.parameter(3))
+        self.obs_lines=[self.opti.parameter(3)]*4
+        # for i in range(4):
+        #     self.obs_lines[i] = self.opti.parameter(3)
 
 
         # ---- cost function          ---------
@@ -389,11 +390,14 @@ class SpecificWorker(GenericWorker):
         #obstacles
         DW = 0.3
         DL = 0.3
-        desp = [(0, 0), (-DW, -DL), (-DW, DL), (DW, -DL), (DW, DL), (0, -DL), (0, DL), (-DW, 0), (DW, 0)]
+        desp = [[0, 0], [-DW, -DL], [-DW, DL], [DW, -DL], [DW, DL], [0, -DL], [0, DL], [-DW, 0], (DW, 0)]
+        self.robot_points_params=[self.opti.parameter(2)]*len(desp)
+        for i, d in enumerate(desp):
+            self.opti.set_value(self.robot_points_params[i], np.array(d))
 
-        for d in desp:
-            for l in self.obs_lines:
-                self.opti.subject_to(d(0)*l[0] + d(1)*l[1] + l[2] >= 0)  
+        # for rp in self.robot_points_params:
+        #     for l in self.obs_lines:
+        #         self.opti.subject_to(((rp[0]+self.X[0][0])*l[0] + (rp[1]+self.X[1][0])*l[1] + l[2]) >= 0)  
 
             
     def points2lines(self, obs_points):
@@ -401,12 +405,12 @@ class SpecificWorker(GenericWorker):
         for i in range(len(obs_points)):
             p1 = obs_points[i]
             p2 = obs_points[(i+1)%len(obs_points)]
-            norm = math.sqrt((p1(1)-p2(1))^2 + (p1(0)-p2(0))^2)
-            line = list
-            line.append((p1(1) - p2(1))/norm)  # A
-            line.append((p2(0) - p1(0))/norm)  # B
-            line.append(-((p1(1) - p2(1))*p1(0) + (p2(0) - p1(0))*p1(1))/norm)  #C
-            obs_lines.append(line)
+            norm = math.sqrt((p1[1]-p2[1])^2 + (p1[0]-p2[0])^2)
+            
+            A = (p1[1] - p2[1])/norm  # A
+            B = (p2[0] - p1[0])/norm  # B
+            C = -((p1[1] - p2[1])*p1[0] + (p2[0] - p1[0])*p1[1])/norm  #C
+            obs_lines.append(np.array([A, B, C]))
         return obs_lines
 
 
