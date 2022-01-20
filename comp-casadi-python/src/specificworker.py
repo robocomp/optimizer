@@ -42,8 +42,8 @@ class SpecificWorker(GenericWorker):
     def __init__(self, proxy_map, startup_check=False):
         super(SpecificWorker, self).__init__(proxy_map)
 
-        self.N = 12  # epoch size
-        self.align_point = self.N//3
+        self.N = 20  # epoch size
+        self.align_point = self.N//2
         self.target_pose = [0, 1]
         self.initialize_differential()
 #        self.initialize_omni()
@@ -52,8 +52,9 @@ class SpecificWorker(GenericWorker):
         s_opts = {"max_iter": 10000,
                   'print_level': 0,
                   'acceptable_tol': 1e-8,
-                  'acceptable_obj_change_tol': 1e-6}
-        self.opti.solver("ipopt", p_opts, s_opts)  # set numerical backend
+                  #'acceptable_obj_change_tol': 1e-6}
+                  }
+        self.opti.solver('ipopt', p_opts, s_opts)  # set numerical backend
         self.sol = None
         self.active = True
         self.ant_dist_to_target = 0
@@ -70,6 +71,9 @@ class SpecificWorker(GenericWorker):
         self.origin_circle = self.ax.add_patch(target_circle)
         robot_square = plt.Rectangle((self.target_pose[0] * 1000, self.target_pose[1] * 1000), 400, 400, color='green')
         self.robot_square = self.ax.add_patch(robot_square)
+        self.obs_points = [np.array([-0.5, 0.5]), np.array([0.5, 0.5]), np.array([0.5, -0.5]), np.array([-0.5, -0.5])]
+        self.ax.add_patch(plt.Rectangle((-500,  -500), 1000, 1000, color='blue'))
+
         self.ax.plot()
         plt.show()
 
@@ -125,17 +129,15 @@ class SpecificWorker(GenericWorker):
                 for i in range(1, self.N):
                     self.opti.set_initial(self.X[:, i], self.sol.value(self.X[:, i]))
 
-            # Obstacles
-            # obs_points = [np.array([-0.5, 0.5]), np.array([0.5, 0.5]), np.array([0.5, -0.5]), np.array([-0.5, -0.5])] #transform to robot SR
-            # obs_points_in_robotSR = [np.array(2)]*4
-            # for i, p in enumerate(obs_points):
-            #     pT = R.transpose() @ (p-current_tr)
-            #     obs_points_in_robotSR[i] = (pT)
+            #Obstacles
+            obs_points_in_robotSR = [np.array(2)]*4
+            for i, p in enumerate(self.obs_points):
+                 pT = R.transpose() @ (p-current_tr)
+                 obs_points_in_robotSR[i] = (pT)
+            lines = self.points2lines(obs_points_in_robotSR)
 
-            # lines = self.points2lines(obs_points_in_robotSR)
-            # for l in lines:
-            #     self.opti.set_value(self.obs_lines[i], l)
-
+            for i,l in enumerate(lines):
+                self.opti.set_value(self.obs_lines[i], l)
 
             # ---- solve NLP ------
             self.sol = self.opti.solve()
@@ -147,8 +149,10 @@ class SpecificWorker(GenericWorker):
             self.advance = self.sol.value(self.v_a*1000)
             self.rotation = self.sol.value(self.v_rot)
 
-            # update self.vect to the desired rotation value at point P
-            vect = self.sol.value(self.X[0:2, self.align_point+1]) - self.sol.value(self.X[0:2, self.align_point-1])
+            # Aling constraint update self.vect to the desired rotation value at point P
+            #vect = self.sol.value(self.X[0:2, self.align_point + 1]) - self.sol.value(self.X[0:2, self.align_point - 1])
+            #print(np.arctan2(vect[0], vect[1]), np.arctan(vect))
+            #self.opti.set_value(self.traj_point_param, 0)
             end = time.time()
             print(f"Elapsed: {end-start:.2f}")
             # move the robot
@@ -156,8 +160,8 @@ class SpecificWorker(GenericWorker):
                 # self.omnirobot_proxy.setSpeedBase( self.sol.value(self.v_x[0]*1000),
                 #                                    self.sol.value(self.v_y[0]*1000),
                 #                                    self.sol.value(self.v_rot[0]))
-                print("Control", adv, rot)
-                self.differentialrobot_proxy.setSpeedBase(adv, rot)
+                # #print("Control", adv, rot)
+                self.differentialrobot_proxy.setSpeedBase(adv*10, rot*10)
                 pass
             except Exception as e:
                 print(e)
@@ -230,14 +234,14 @@ class SpecificWorker(GenericWorker):
             R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
             ldata_world = [R@l + r for l in ldata_robot]
             # convexify
-            context = get_context()
-            Contour, Point, Polygon = context.contour_cls, context.point_cls, context.polygon_cls
-            poly = Polygon(Contour([Point(point[0], point[1]) for point in ldata_world]), [])
-            res = Triangulation.constrained_delaunay(poly, context=context).triangles()
+            #context = get_context()
+            #Contour, Point, Polygon = context.contour_cls, context.point_cls, context.polygon_cls
+            #poly = Polygon(Contour([Point(point[0], point[1]) for point in ldata_world]), [])
+            #res = Triangulation.constrained_delaunay(poly, context=context).triangles()
             #print("Convex polygons", len(res))
-            for cont in res:
-                for p in cont.vertices:
-                    ldata_world.append([p.x, p.y])
+            #for cont in res:
+            #    for p in cont.vertices:
+            #        ldata_world.append([p.x, p.y])
 
         except Exception as e:
             print(e)
@@ -249,7 +253,7 @@ class SpecificWorker(GenericWorker):
         self.opti = ca.Opti()  # Optimization problem
 
         # ---- state variables ---------
-        self.X = self.opti.variable(3, self.N + 1)  # state trajectory
+        self.X = self.opti.variable(3, self.N + 1)  # state trajectory in robot's RS
         self.pos_x = self.X[0, :]
         self.pos_y = self.X[1, :]
         self.phi = self.X[2, :]
@@ -260,23 +264,21 @@ class SpecificWorker(GenericWorker):
         self.v_y = self.U[1, :]
         self.v_rot = self.U[2, :]
 
-        self.target_oparam = self.opti.parameter(2)
-        self.initial_oparam = self.opti.parameter(3)
-
         # ---- cost function          ---------
-        self.opti.set_value(self.target_oparam, self.target_pose)
-        self.opti.set_value(self.initial_oparam, [0.0, 0.0, 0.0])
         sum_dist = self.opti.parameter()
         self.opti.set_value(sum_dist, 0)
         for k in range(self.N - 1):
             sum_dist += ca.sumsqr(self.X[0:2, k + 1] - self.X[0:2, k])
-
         self.opti.minimize(sum_dist + ca.sumsqr(self.v_x) + ca.sumsqr(self.v_y) + 0.1*ca.sumsqr(self.v_rot))
 
         # ---- dynamic constraints for omniwheeled robot --------
         # dx/dt = f(x, u)
-        f = lambda x, u: ca.vertcat(ca.horzcat(ca.cos(x[2]), -ca.sin(x[2]), 0),
-                                    ca.horzcat(ca.sin(x[2]), ca.cos(x[2]), 0),
+        # f = lambda x, u: ca.vertcat(ca.horzcat(ca.cos(x[2]), -ca.sin(x[2]), 0),
+        #                             ca.horzcat(ca.sin(x[2]), ca.cos(x[2]), 0),
+        #                             ca.horzcat(0, 0, 1)) @ u
+
+        f = lambda x, u: ca.vertcat(ca.horzcat(1, 0, 0),
+                                    ca.horzcat(0, 1, 0),
                                     ca.horzcat(0, 0, 1)) @ u
 
         dt = 1 / self.N  # length of a control interval
@@ -284,11 +286,11 @@ class SpecificWorker(GenericWorker):
         for k in range(self.N):  # loop over control intervals
             # Runge-Kutta 4 integration
             k1 = f(self.X[:, k], self.U[:, k])
-            k2 = f(self.X[:, k] + dt / 2 * k1, self.U[:, k])
-            k3 = f(self.X[:, k] + dt / 2 * k2, self.U[:, k])
-            k4 = f(self.X[:, k] + dt * k3, self.U[:, k])
-            x_next = self.X[:, k] + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-            #x_next = self.X[:, k] + k1
+            #k2 = f(self.X[:, k] + dt / 2 * k1, self.U[:, k])
+            #k3 = f(self.X[:, k] + dt / 2 * k2, self.U[:, k])
+            #k4 = f(self.X[:, k] + dt * k3, self.U[:, k])
+            #x_next = self.X[:, k] + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+            x_next = self.X[:, k] + k1
             self.opti.subject_to(self.X[:, k + 1] == x_next)  # close the gaps
 
         # ---- control constraints -----------
@@ -297,15 +299,19 @@ class SpecificWorker(GenericWorker):
         self.opti.subject_to(self.opti.bounded(-1, self.v_rot, 1))  # control is limited
 
         # ---- differential drive contraint ----------
-        self.opti.subject_to(self.v_x == 0)
+        #self.opti.subject_to(self.v_x == 0)
 
         # ---- forward drive contraint ----------
         self.opti.subject_to(self.v_y >= 0)
 
         # ---- trajectory align contraint ----------
-        self.vect = self.opti.parameter(2)
-        self.opti.set_value(self.vect, [0, 1])
-        #self.opti.subject_to(self.phi[self.align_point] == ca.atan2(self.vect[0], self.vect[1]))
+        self.traj_point_param = self.opti.parameter()
+        self.opti.set_value(self.traj_point_param, 0)
+        self.opti.subject_to(self.phi[self.align_point] == self.traj_point_param)
+
+        # target and initial
+        self.target_oparam = self.opti.parameter(2)
+        self.initial_oparam = self.opti.parameter(3)
 
         # ---- initial point constraints -----------
         self.opti.subject_to(self.pos_x[0] == self.initial_oparam[0])
@@ -335,15 +341,13 @@ class SpecificWorker(GenericWorker):
         self.target_oparam = self.opti.parameter(2)
         self.initial_oparam = self.opti.parameter(3)
 
+        # lines
         self.obs_lines=[self.opti.parameter(3)]*4
-        # for i in range(4):
-        #     self.obs_lines[i] = self.opti.parameter(3)
 
 
         # ---- cost function          ---------
         self.opti.set_value(self.target_oparam, self.target_pose)
         self.opti.set_value(self.initial_oparam, [0.0, 0.0, 0.0])
-        #self.opti.set_initial(self.T, 1)
 
         sum_dist = self.opti.parameter()
         self.opti.set_value(sum_dist, 0)
@@ -353,7 +357,7 @@ class SpecificWorker(GenericWorker):
         # self.opti.minimize(ca.sumsqr(self.X[0:2, -1] - self.target_oparam)
         #                    + 0.01 * ca.sumsqr(self.v_rot)
         #                    + ca.sumsqr(self.v_a))
-        self.opti.minimize(0.001*ca.sumsqr(self.v_rot) + ca.sumsqr(self.v_a))
+        #self.opti.minimize(0.001*ca.sumsqr(self.v_rot) + ca.sumsqr(self.v_a))
         self.opti.minimize( sum_dist + ca.sumsqr(self.v_rot) + ca.sumsqr(self.v_a))
 
         # ---- dynamic constraints for differential robot --------
@@ -363,7 +367,7 @@ class SpecificWorker(GenericWorker):
                                     ca.horzcat(0,            1)) @ u
 
         dt = 1.0 / self.N  # length of a control interval
-        dt = 1   # timer interval in secs
+        #dt = 1   # timer interval in secs
         for k in range(self.N):  # loop over control intervals
             # Runge-Kutta 4 integration
             k1 = f(self.X[:, k], self.U[:, k])
@@ -387,30 +391,35 @@ class SpecificWorker(GenericWorker):
         self.opti.subject_to(self.pos_x[-1] == self.target_oparam[0])
         self.opti.subject_to(self.pos_y[-1] == self.target_oparam[1])
 
+        # ---- forward velocity constraints -----------
+        self.opti.subject_to(self.v_a >= 0)
+
         #obstacles
-        DW = 0.3
-        DL = 0.3
-        desp = [[0, 0], [-DW, -DL], [-DW, DL], [DW, -DL], [DW, DL], [0, -DL], [0, DL], [-DW, 0], (DW, 0)]
-        self.robot_points_params=[self.opti.parameter(2)]*len(desp)
-        for i, d in enumerate(desp):
-            self.opti.set_value(self.robot_points_params[i], np.array(d))
+        #DW = 0.3
+        #DL = 0.3
+        #desp = [[0, 0], [-DW, -DL], [-DW, DL], [DW, -DL], [DW, DL], [0, -DL], [0, DL], [-DW, 0], (DW, 0)]
+        #self.robot_points_params = [self.opti.parameter(2)]*len(desp)
+        #for i, d in enumerate(desp):
+        #    self.opti.set_value(self.robot_points_params[i], np.array(d))
 
-        # for rp in self.robot_points_params:
-        #     for l in self.obs_lines:
-        #         self.opti.subject_to(((rp[0]+self.X[0][0])*l[0] + (rp[1]+self.X[1][0])*l[1] + l[2]) >= 0)  
+        #for rp in self.robot_points_params:
+        #    for l in self.obs_lines:
+        #       self.opti.subject_to(((rp[0]+self.X[0][0])*l[0] + (rp[1]+self.X[1][0])*l[1] + l[2]) >= 0)
 
-            
+        for i in range(3,self.N-5):
+            for l in self.obs_lines:
+                self.opti.subject_to(self.pos_x[i]*l[0] + self.pos_y[i]*l[1] + l[2] >= 0.4)
+
     def points2lines(self, obs_points):
-        obs_lines = list
+        obs_lines = []
         for i in range(len(obs_points)):
             p1 = obs_points[i]
             p2 = obs_points[(i+1)%len(obs_points)]
-            norm = math.sqrt((p1[1]-p2[1])^2 + (p1[0]-p2[0])^2)
-            
+            norm = math.sqrt((p1[1]-p2[1])**2 + (p1[0]-p2[0])**2)
             A = (p1[1] - p2[1])/norm  # A
             B = (p2[0] - p1[0])/norm  # B
             C = -((p1[1] - p2[1])*p1[0] + (p2[0] - p1[0])*p1[1])/norm  #C
-            obs_lines.append(np.array([A, B, C]))
+            obs_lines.append([A, B, C])
         return obs_lines
 
 
