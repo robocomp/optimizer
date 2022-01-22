@@ -42,7 +42,7 @@ class SpecificWorker(GenericWorker):
     def __init__(self, proxy_map, startup_check=False):
         super(SpecificWorker, self).__init__(proxy_map)
 
-        self.N = 20  # epoch size
+        self.N = 20  # intial epoch size
         self.align_point = self.N//2
         self.target_pose = [0, 1]
         self.initialize_differential()
@@ -95,130 +95,62 @@ class SpecificWorker(GenericWorker):
     @logger.catch
     def compute(self):
         print("------------------------")
-        try:
-            #currentPose = self.omnirobot_proxy.getBaseState()
-            currentPose = self.differentialrobot_proxy.getBaseState()
-            current_tr = np.array([currentPose.x/1000, currentPose.z/1000])
-        except:
-            print("Error connecting to base")
-
-        # laser
-        laser_poly_robot, laser_poly_world = self.read_laser(currentPose)
+        current_pose, current_tr = self.read_base()
+        laser_poly_robot, laser_poly_world = self.read_laser(current_pose)
 
         start = time.time()
         dist_to_target = np.linalg.norm(current_tr - self.target_pose)
-        der_to_target = dist_to_target - self.ant_dist_to_target
-        print(f"Dist to target: {dist_to_target:.2f}, Dist ant:, {self.ant_dist_to_target:.2f}, Der:, {der_to_target:.2f}")
-        self.ant_dist_to_target = dist_to_target
-        print(f"Current pose:, {currentPose.x:.2f}, {currentPose.z:.2f}, {currentPose.alpha:.2f}")
+        print(f"Dist to target: {dist_to_target:.2f}")
+        print(f"Current pose:, {current_pose.x:.2f}, {current_pose.z:.2f}, {current_pose.alpha:.2f}")
         print(f"Target pose:, {self.target_pose[0]:.2f}, {self.target_pose[1]:.2f}")
 
         if self.active and dist_to_target > 0.15:
-            
+
+            # recompute the length of the path
+
             # ---- initial values for state ---
-            self.opti.set_value(self.initial_oparam[0], 0)
-            self.opti.set_value(self.initial_oparam[1], 0)
-            self.opti.set_value(self.initial_oparam[2], 0)
-            R = np.array([[np.cos(currentPose.alpha), -np.sin(currentPose.alpha)],
-                          [np.sin(currentPose.alpha), np.cos(currentPose.alpha)]])
-            target_in_robot = R.transpose() @ (self.target_pose-current_tr)
-            self.opti.set_value(self.target_oparam, target_in_robot)
+            self.opti.set_value(self.initial_oparam, [0, 0, 0])
+            self.opti.set_value(self.target_oparam, self.from_world_to_robot(self.target_pose, current_pose))
+
+            # Aling constraint update self.vect to the desired rotation value at point P
+            # vect = self.sol.value(self.X[0:2, self.align_point + 1]) - self.sol.value(self.X[0:2, self.align_point - 1])
+            # self.opti.set_value(self.traj_point_param, 0)
 
             # Warm start
             if self.sol:
                 for i in range(1, self.N):
                     self.opti.set_initial(self.X[:, i], self.sol.value(self.X[:, i]))
 
-            #Obstacles
+            # obstacles
             obs_points_in_robotSR = [np.array(2)]*4
             for i, p in enumerate(self.obs_points):
-                 pT = R.transpose() @ (p-current_tr)
-                 obs_points_in_robotSR[i] = (pT)
+                obs_points_in_robotSR[i] = (self.from_world_to_robot(p, current_pose))
             lines = self.points2lines(obs_points_in_robotSR)
-
-            for i,l in enumerate(lines):
+            for i, l in enumerate(lines):
                 self.opti.set_value(self.obs_lines[i], l)
 
             # ---- solve NLP ------
             self.sol = self.opti.solve()
+            end = time.time()
 
             # ---- print output -----
-            print("Iterations:", self.sol.stats()["iter_count"])
-            adv = self.sol.value(self.v_a[0]*1000)
+            adv = self.sol.value(self.v_a[0] * 1000)
             rot = self.sol.value(self.v_rot[0])
-            self.advance = self.sol.value(self.v_a*1000)
-            self.rotation = self.sol.value(self.v_rot)
-
-            # Aling constraint update self.vect to the desired rotation value at point P
-            #vect = self.sol.value(self.X[0:2, self.align_point + 1]) - self.sol.value(self.X[0:2, self.align_point - 1])
-            #print(np.arctan2(vect[0], vect[1]), np.arctan(vect))
-            #self.opti.set_value(self.traj_point_param, 0)
-            end = time.time()
+            print("Iterations:", self.sol.stats()["iter_count"])
             print(f"Elapsed: {end-start:.2f}")
+
             # move the robot
-            try:
-                # self.omnirobot_proxy.setSpeedBase( self.sol.value(self.v_x[0]*1000),
-                #                                    self.sol.value(self.v_y[0]*1000),
-                #                                    self.sol.value(self.v_rot[0]))
-                # #print("Control", adv, rot)
-                self.differentialrobot_proxy.setSpeedBase(adv*10, rot*10)
-                pass
-            except Exception as e:
-                print(e)
+            self.move_robot(adv*5, rot)
 
             # draw
-            xs = self.sol.value(self.pos_x * 1000)
-            ys = self.sol.value(self.pos_y * 1000)
-            path_in_world = R @ np.array([xs, ys])
-            for i in range(path_in_world.shape[1]):
-                path_in_world[:, i] = path_in_world[:, i] + current_tr*1000
-            self.line_plt.set_xdata(path_in_world[0, :])
-            self.line_plt.set_ydata(path_in_world[1, :])
-            # draw laser
-            self.line_laser.set_xdata(laser_poly_world[:, 0])
-            self.line_laser.set_ydata(laser_poly_world[:, 1])
-            # draw convex polys
-
-            # draw robot
-            self.robot_square.remove()
-            self.robot_square = self.ax.add_patch(plt.Rectangle(current_tr*1000-[150, 250], 300, 500,
-                                                                color='green', angle=np.rad2deg(currentPose.alpha)))
-            # self.ax.clear()
-            # target_circle = plt.Circle((self.target_pose[0] * 1000, self.target_pose[1] * 1000), 100, color='blue')
-            # self.ax.add_patch(target_circle)
-            # avs = self.sol.value(self.v_a*1000)
-            # rs = self.sol.value(self.v_rot)
-            # np.savetxt('controls.csv', np.column_stack([avs, rs]), delimiter=',')
-            # u = avs * np.sin(rs)
-            # u = np.append(u, 100)
-            # v = avs * np.cos(rs)
-            # v = np.append(v, 100)
-            # self.ax.quiver( self.sol.value(self.pos_x*1000),
-            #                 self.sol.value(self.pos_y*1000),
-            #                 u, v, scale = None)
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
+            self.draw(current_pose, current_tr, laser_poly_world)
 
         else:   # at target
-            try:
-                #self.omnirobot_proxy.setSpeedBase(0, 0, 0)
-                self.differentialrobot_proxy.setSpeedBase(0, 0)
-                self.active = False
-                print("Stopping")
-                sys.exit(0)
-            except Exception as e: print(e)
+            self.move_robot(0, 0)
+            self.active = False
+            print("Stopping")
 
-        #plot(sol.value(self.v_x), label="vx")
-        #plot(sol.value(self.v_y), label="vy")
-        #plot(sol.value(self.v_rot), label="vrot")
-        #plt.scatter(sol.value(self.pos_x*1000), sol.value(self.pos_y*1000))
-
-        #plt.plot(sol.value(self.v_x * 1000), sol.value(self.v_y * 1000), '->')
-        #plot(sol.value(self.pos_x), label="px")
-        #plot(sol.value(self.pos_y), label="py")
-        #legend(loc="upper left")
-        #show()
-
+########################################################################################
     def read_laser(self, rpose):
         ldata_robot = [[0, 0]]
         ldata_world = []
@@ -246,6 +178,52 @@ class SpecificWorker(GenericWorker):
         except Exception as e:
             print(e)
         return ldata_robot, np.array(ldata_world)
+    def read_base(self):
+        try:
+            # currentPose = self.omnirobot_proxy.getBaseState()
+            currentPose = self.differentialrobot_proxy.getBaseState()
+            current_tr = np.array([currentPose.x / 1000, currentPose.z / 1000])
+            return currentPose, current_tr
+        except:
+            print("Error connecting to base")
+            return None, None
+    def from_world_to_robot(self, point, current_pose):
+        R = np.array([[np.cos(current_pose.alpha), -np.sin(current_pose.alpha)],
+                      [np.sin(current_pose.alpha), np.cos(current_pose.alpha)]])
+        tr = np.array([current_pose.x/1000, current_pose.z/1000])
+        return R.transpose() @ (point - tr)
+    def from_robot_to_world(self, point, current_pose):
+        R = np.array([[np.cos(current_pose.alpha), -np.sin(current_pose.alpha), current_pose.x],
+                      [np.sin(current_pose.alpha), np.cos(current_pose.alpha), current_pose.z],
+                      [0, 0, 1]])
+        return R @ np.vstack([point, np.ones(point.shape[1])])
+    def move_robot(self, adv, rot, side=0):
+        try:
+            # self.omnirobot_proxy.setSpeedBase( self.sol.value(self.v_x[0]*1000),
+            #                                    self.sol.value(self.v_y[0]*1000),
+            #                                    self.sol.value(self.v_rot[0]))
+            # #print("Control", adv, rot)
+            self.differentialrobot_proxy.setSpeedBase(adv, rot)
+        except Exception as e:
+            print(e)
+    def draw(self, current_pose, current_tr, laser_poly_world):
+        xs = self.sol.value(self.pos_x * 1000)
+        ys = self.sol.value(self.pos_y * 1000)
+        path_in_world = self.from_robot_to_world(np.array([xs, ys]), current_pose)
+        self.line_plt.set_xdata(path_in_world[0, :])
+        self.line_plt.set_ydata(path_in_world[1, :])
+
+        # draw laser
+        self.line_laser.set_xdata(laser_poly_world[:, 0])
+        self.line_laser.set_ydata(laser_poly_world[:, 1])
+        # draw convex polys
+
+        # draw robot
+        self.robot_square.remove()
+        self.robot_square = self.ax.add_patch(plt.Rectangle(current_tr * 1000 - [150, 250], 300, 500,
+                                                            color='green', angle=np.rad2deg(current_pose.alpha)))
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
 
     #@logger.catch
     def initialize_omni(self):
@@ -345,7 +323,7 @@ class SpecificWorker(GenericWorker):
         self.obs_lines=[self.opti.parameter(3)]*4
 
 
-        # ---- cost function          ---------
+        # ---- cost function
         self.opti.set_value(self.target_oparam, self.target_pose)
         self.opti.set_value(self.initial_oparam, [0.0, 0.0, 0.0])
 
@@ -358,7 +336,12 @@ class SpecificWorker(GenericWorker):
         #                    + 0.01 * ca.sumsqr(self.v_rot)
         #                    + ca.sumsqr(self.v_a))
         #self.opti.minimize(0.001*ca.sumsqr(self.v_rot) + ca.sumsqr(self.v_a))
-        self.opti.minimize( sum_dist + ca.sumsqr(self.v_rot) + ca.sumsqr(self.v_a))
+
+        self.opti.minimize(sum_dist +
+                           0.1*ca.sumsqr(self.v_rot) +
+                           ca.sumsqr(self.v_a) +
+                           ca.sumsqr(self.X[0:2, -1] - self.target_oparam))
+
 
         # ---- dynamic constraints for differential robot --------
         # dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
@@ -388,8 +371,8 @@ class SpecificWorker(GenericWorker):
         self.opti.subject_to(self.phi[0] == self.initial_oparam[2])
 
         # ---- target point constraints -----------
-        self.opti.subject_to(self.pos_x[-1] == self.target_oparam[0])
-        self.opti.subject_to(self.pos_y[-1] == self.target_oparam[1])
+        #self.opti.subject_to(self.pos_x[-1] == self.target_oparam[0])
+        #self.opti.subject_to(self.pos_y[-1] == self.target_oparam[1])
 
         # ---- forward velocity constraints -----------
         self.opti.subject_to(self.v_a >= 0)
