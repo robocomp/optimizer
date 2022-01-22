@@ -10,12 +10,18 @@ SET ( HEADERS
   specificmonitor.h
 )
 
+#FIND_PACKAGE( CASADI REQUIRED )
+find_package(casadi)
+#INCLUDE( FindCASADI.cmake )
+INCLUDE_DIRECTORIES( . /home/robocomp/software/casadi/include )
+
 INCLUDE( $ENV{ROBOCOMP}/cmake/modules/opencv4.cmake )
 
 set(CMAKE_CXX_STANDARD 20)
 
 add_definitions(-O3 -march=native  -fmax-errors=5 )
-SET (LIBS ${LIBS}  )
-
+# SET (LIBS ${LIBS} ${ACADO_SHARED_LIBRARIES} )
+SET (LIBS ${LIBS} -L/home/robocomp/software/casadi-src/build/lib/ casadi )
+#find_package(IPOPT)
 
 

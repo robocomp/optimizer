@@ -29,6 +29,10 @@
 
 #include <genericworker.h>
 #include <Eigen/Dense>
+//#include <acado_toolkit.hpp>
+//#include <bindings/acado_gnuplot/gnuplot_window.hpp>
+#include <casadi/casadi.hpp>
+#include <casadi/core/optistack.hpp>
 
 class SpecificWorker : public GenericWorker
 {
@@ -47,8 +51,11 @@ public slots:
 
 private:
 	bool startup_check_flag;
-
     std::tuple<QPolygonF, QPolygonF> read_laser(const RoboCompGenericBase::TBaseState &pose);
+
+    void initialize_differential(const std::vector<double> &target_robot, const std::vector<double> &init_robot);
+    std::vector<std::tuple<double, double, double>> points_to_lines(const std::vector<Eigen::Vector2d> &points_in_robot);
+
 };
 
 #endif
