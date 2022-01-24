@@ -63,7 +63,7 @@ void SpecificWorker::initialize(int period)
         std::vector<double> init_robot{0, 0, 0};
         NUM_STEPS = 10;
 
-        obs_points = {{4-0.5, 0.5}, {4+0.5, 0.5}, {4+0.5, -0.5}, {4-0.5, -0.5}};
+        obs_points = {{-0.5, 0.5}, {0.5, 0.5}, {0.5, -0.5}, {-0.5, -0.5}};
         initialize_differential(NUM_STEPS, e2v(target_in_world), init_robot);
 
         //timer.setSingleShot(true);
@@ -105,13 +105,15 @@ void SpecificWorker::compute()
        else // Warm start
            if (not previous_values.empty())
                for (auto i: iter::range(1, NUM_STEPS))
-                //    opti.set_initial(state(casadi::Slice(), i), solution.value(state(casadi::Slice(), i)));
                    opti.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[3*i], 
-                                                                                   previous_values[3*i+1], 
+                                                                                   previous_values[3*i+1],
                                                                                    previous_values[3*i+2]});
-            //else
-                // initialize generating a line segment from 0 to target
-
+           else   // initialize generating a line segment from 0 to target
+           {
+               double landa = 1.0 / (dist_to_target / NUM_STEPS);
+               for(auto &&[i, step] : iter::range(0.0, 1.0, landa) | iter::enumerate)
+                   opti.set_initial(state(casadi::Slice(0,2),i), e2v(target_in_world * step));
+           }
 
         // initial values for state ---
         opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
@@ -149,7 +151,7 @@ void SpecificWorker::compute()
             auto path = std::vector<double>(solution.value(pos));
             draw_path(path, Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
         }
-        catch (...) {}
+        catch (...) { std::cout << "No solution found" << std::endl; }
     }
     else  // at  target
     {
@@ -216,7 +218,7 @@ void SpecificWorker::initialize_differential(const int N, const std::vector<doub
 
     // dynamic constraints for differential robot: dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
     auto integrate = [](casadi::MX phi, casadi::MX u) { return casadi::MX::mtimes(
-                                                casadi::MX::vertcat(std::vector<casadi::MX>{
+                                                    casadi::MX::vertcat(std::vector<casadi::MX>{
                                                     casadi::MX::horzcat(std::vector<casadi::MX>{sin(phi), 0.0}),
                                                     casadi::MX::horzcat(std::vector<casadi::MX>{cos(phi), 0.0}),
                                                     casadi::MX::horzcat(std::vector<casadi::MX>{0.0,      1.0})}
@@ -239,10 +241,15 @@ void SpecificWorker::initialize_differential(const int N, const std::vector<doub
     // forward velocity constraints -----------
     opti.subject_to(adv >= 0);
 
-    // obstacle constraints
-    for(auto i : iter::range(3, N-5))
+//    // obstacle constraints
+//    for(auto i : iter::range(3, N-5))
+//        for(auto l : obs_lines)
+//            opti.subject_to(pos(0,i)*l(0) + pos(1,i)*l(1) + l(2) >= 0.5);
+
+    for(auto i : iter::range(1, N-1))
         for(auto l : obs_lines)
-            opti.subject_to(pos(0,i)*l(0) + pos(1,i)*l(1) + l(2) >= 0.5);
+            opti.subject_to(pos(0, i)*l(0) + pos(1, i)*l(1)  >= 0);
+
 }
 /////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d SpecificWorker::from_robot_to_world(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang)
@@ -284,7 +291,6 @@ std::vector<std::vector<double>> SpecificWorker::points_to_lines(const std::vect
         auto A = (p1[1] - p2[1]) / norm;
         auto B = (p2[0] - p1[0]) / norm;
         auto C = -((p1[1] - p2[1]) * p1[0] + (p2[0] - p1[0]) * p1[1]) / norm;
-        qInfo()<<A<<B<<C;
         lines[i] = {A, B, C};
     }
     return lines;
