@@ -61,9 +61,9 @@ void SpecificWorker::initialize(int period)
 
         target_in_world = {0, 2}; //meters
         std::vector<double> init_robot{0, 0, 0};
-        NUM_STEPS = 20;
+        NUM_STEPS = 10;
 
-        obs_points = {{-0.5, 0.5}, {0.5, 0.5}, {0.5, -0.5}, {-0.5, -0.5}};
+        obs_points = {{4-0.5, 0.5}, {4+0.5, 0.5}, {4+0.5, -0.5}, {4-0.5, -0.5}};
         initialize_differential(NUM_STEPS, e2v(target_in_world), init_robot);
 
         //timer.setSingleShot(true);
@@ -74,6 +74,7 @@ void SpecificWorker::initialize(int period)
 void SpecificWorker::compute()
 {
     //static casadi::OptiSol solution = opti.solve();
+    static std::vector<double> previous_values;
 
     qInfo() << "------------------------";
     RoboCompGenericBase::TBaseState current_pose;
@@ -101,10 +102,16 @@ void SpecificWorker::compute()
         if(dist_to_target < 2)
             initialize_differential(10, e2v(from_world_to_robot(target_in_world, current_tr, current_pose.alpha)),
                                     std::vector<double>{0, 0, 0});
-//        else // Warm start
-//            if (not solution.value(pos).is_empty())
-//                for (auto i: iter::range(1, NUM_STEPS))
-//                    opti.set_initial(state(casadi::Slice(), i), solution.value(state(casadi::Slice(), i)));
+       else // Warm start
+           if (not previous_values.empty())
+               for (auto i: iter::range(1, NUM_STEPS))
+                //    opti.set_initial(state(casadi::Slice(), i), solution.value(state(casadi::Slice(), i)));
+                   opti.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[3*i], 
+                                                                                   previous_values[3*i+1], 
+                                                                                   previous_values[3*i+2]});
+            //else
+                // initialize generating a line segment from 0 to target
+
 
         // initial values for state ---
         opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
@@ -124,6 +131,7 @@ void SpecificWorker::compute()
         try
         {
             auto solution = opti.solve();
+            previous_values = std::vector<double>(solution.value(state)); 
 
             std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
             std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
@@ -232,9 +240,9 @@ void SpecificWorker::initialize_differential(const int N, const std::vector<doub
     opti.subject_to(adv >= 0);
 
     // obstacle constraints
-    //for(auto i : iter::range(3, N-5))
-    for(auto l : obs_lines)
-       opti.subject_to(pos(0,N/2)*l(0) + pos(1,N/2)*l(1) + l(2) >= 0.5);
+    for(auto i : iter::range(3, N-5))
+        for(auto l : obs_lines)
+            opti.subject_to(pos(0,i)*l(0) + pos(1,i)*l(1) + l(2) >= 0.5);
 }
 /////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d SpecificWorker::from_robot_to_world(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang)
@@ -276,6 +284,7 @@ std::vector<std::vector<double>> SpecificWorker::points_to_lines(const std::vect
         auto A = (p1[1] - p2[1]) / norm;
         auto B = (p2[0] - p1[0]) / norm;
         auto C = -((p1[1] - p2[1]) * p1[0] + (p2[0] - p1[0]) * p1[1]) / norm;
+        qInfo()<<A<<B<<C;
         lines[i] = {A, B, C};
     }
     return lines;

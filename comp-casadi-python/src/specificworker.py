@@ -140,7 +140,7 @@ class SpecificWorker(GenericWorker):
             print(f"Elapsed: {end-start:.2f}")
 
             # move the robot
-            self.move_robot(adv*5, rot)
+            # self.move_robot(adv*5, rot)
 
             # draw
             self.draw(current_pose, current_tr, laser_poly_world)
@@ -402,6 +402,7 @@ class SpecificWorker(GenericWorker):
             A = (p1[1] - p2[1])/norm  # A
             B = (p2[0] - p1[0])/norm  # B
             C = -((p1[1] - p2[1])*p1[0] + (p2[0] - p1[0])*p1[1])/norm  #C
+            print(A,B,C)
             obs_lines.append([A, B, C])
         return obs_lines
 
