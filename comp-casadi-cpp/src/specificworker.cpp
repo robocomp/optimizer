@@ -389,7 +389,7 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &p
     poly_part.SetHole(false);
     for(auto &&[i, l] : iter::enumerate(poly_robot))
     {
-        poly_part[i].x = l.x();
+        poly_part[i].x = l.x();   // to meters
         poly_part[i].y = l.y();
     }
     poly_part.SetOrientation(TPPL_CCW);
@@ -416,10 +416,10 @@ SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &p
         Lines line(num_points);
         std::generate(line.begin(), line.end(),[poly_res, k=0, num_points]() mutable
         {
-            float x1 = poly_res.GetPoint(k).x;
-            float y1 = poly_res.GetPoint(k).y;
-            float x2 = poly_res.GetPoint((++k) % num_points).x;
-            float y2 = poly_res.GetPoint((k) % num_points).y;
+            float x1 = poly_res.GetPoint(k).x /1000;
+            float y1 = poly_res.GetPoint(k).y /1000;
+            float x2 = poly_res.GetPoint((++k) % num_points).x /1000;
+            float y2 = poly_res.GetPoint((k) % num_points).y /1000;
             float norm = sqrt(pow(y1-y2, 2) + pow(x2-x1, 2));
             return std::make_tuple((y1 - y2)/norm, (x2 - x1)/norm, -((y1 - y2)*x1 + (x2 - x1)*y1)/norm);
         });
