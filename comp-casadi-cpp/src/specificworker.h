@@ -62,8 +62,9 @@ public slots:
 private:
     bool startup_check_flag;
     AbstractGraphicViewer *viewer_robot;
-    void initialize_differential(const int N, const std::vector<double> &target_robot, const std::vector<double> &init_robot);
-    std::vector<std::vector<double>> points_to_lines(const std::vector<Eigen::Vector2d> &points_in_robot);
+    casadi::Opti initialize_differential(const int N);
+    std::vector<std::vector<double>> points_to_lines(const std::vector<Eigen::Vector2d> &points_in_robot,
+                                                     const Eigen::Vector2d &tr, double alpha);
     void move_robot(float adv, float rot, float side = 0);
     std::vector<double> e2v(const Eigen::Vector2d &v);
     QPointF e2q(const Eigen::Vector2d &v);
@@ -81,10 +82,7 @@ private:
     casadi::MX control;
     casadi::MX adv;
     casadi::MX rot;
-    casadi::MX target_oparam;
-    casadi::MX initial_oparam;
-    std::vector<casadi::MX> obs_lines;
-    std::vector<Eigen::Vector2d> obs_points;
+    std::vector<Eigen::Vector2d> convex_polygon;
 
     //robot
     const int ROBOT_LENGTH = 400;
@@ -110,10 +108,11 @@ private:
     using Lines = std::vector<std::tuple<float, float, float>>;
     using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
     std::vector<tuple<Lines, QPolygonF>> world_free_regions;
-
     Obstacles compute_laser_partitions(QPolygonF &laser_poly);
     QPolygonF ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon);
     void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
     void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
+
+    tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> read_base();
 };
 #endif

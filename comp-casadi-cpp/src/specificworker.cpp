@@ -61,10 +61,10 @@ void SpecificWorker::initialize(int period)
 
         target_in_world = {0, 2}; //meters
         std::vector<double> init_robot{0, 0, 0};
-        NUM_STEPS = 10;
+        NUM_STEPS = 20;
 
-        obs_points = {{-0.5, 0.5}, {0.5, 0.5}, {0.5, -0.5}, {-0.5, -0.5}};
-        initialize_differential(NUM_STEPS, e2v(target_in_world), init_robot);
+        convex_polygon = {{-0.5, 0.5}, {0.5, 0.5}, {0.5, -0.5}, {-0.5, -0.5}};
+        opti = initialize_differential(NUM_STEPS);
 
         //timer.setSingleShot(true);
         timer.start(Period);
@@ -73,75 +73,122 @@ void SpecificWorker::initialize(int period)
 
 void SpecificWorker::compute()
 {
-    //static casadi::OptiSol solution = opti.solve();
+    auto opti_local = opti.copy();
+    casadi::Slice all;
     static std::vector<double> previous_values;
 
     qInfo() << "------------------------";
-    RoboCompGenericBase::TBaseState current_pose;
-    Eigen::Vector2d current_tr;
-    try
-    {
-        //currentPose = self.omnirobot_proxy.getBaseState()
-        differentialrobot_proxy->getBaseState(current_pose);
-        current_tr[0] = current_pose.x / 1000; current_tr[1] = current_pose.z / 1000;
-        robot_polygon->setRotation(current_pose.alpha * 180 / M_PI);
-        robot_polygon->setPos(current_pose.x, current_pose.z);
-    }
-    catch(const Ice::Exception &e){ qInfo() << "Error connecting to base"; std::cout << e.what() << std::endl;}
+
+    //base
+    auto [current_pose, current_tr] = read_base();
 
     // laser
     auto &&[laser_poly_robot, laser_poly_world] = read_laser(current_tr, current_pose.alpha);
-    auto obstacles = compute_laser_partitions(laser_poly_robot);
-    draw_partitions(obstacles, QColor("Magenta"));
+    auto free_regions = compute_laser_partitions(laser_poly_robot);
+    // select region with robot inside
+    Lines robot_lines;
+    for(const auto &[lines, poly] : free_regions)
+    {
+        bool inside = true;
+        for (const auto &[A, B, C]: lines)
+            if ((inside = inside and C) > 0) // since ABC were computed in the robot's coordinate frame
+            {
+                robot_lines = lines;
+                break;
+            }
+    }
+    draw_partitions(free_regions, QColor("Magenta"));
 
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     double dist_to_target = (current_tr - target_in_world).norm();
     if( this->active and dist_to_target > 0.15)
     {
         // recompute the length of the optimization path if close to target
-        if(dist_to_target < 2)
-            initialize_differential(10, e2v(from_world_to_robot(target_in_world, current_tr, current_pose.alpha)),
-                                    std::vector<double>{0, 0, 0});
-       else // Warm start
-           if (not previous_values.empty())
-               for (auto i: iter::range(1, NUM_STEPS))
-                   opti.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[3*i], 
-                                                                                   previous_values[3*i+1],
-                                                                                   previous_values[3*i+2]});
-           else   // initialize generating a line segment from 0 to target
-           {
-               double landa = 1.0 / (dist_to_target / NUM_STEPS);
-               for(auto &&[i, step] : iter::range(0.0, 1.0, landa) | iter::enumerate)
-                   opti.set_initial(state(casadi::Slice(0,2),i), e2v(target_in_world * step));
-           }
+//        if(dist_to_target < 2)
+//        {
+//            initialize_differential(10, e2v(from_world_to_robot(target_in_world, current_tr, current_pose.alpha)),
+//                                    std::vector<double>{0, 0, 0});
+//
+//       else
+        // Warm start
+        if (not previous_values.empty())
+            for (auto i: iter::range(1, NUM_STEPS))
+                opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[3 * i],
+                                                                                      previous_values[3 * i + 1],
+                                                                                      previous_values[3 * i + 2]});
+        else   // initialize generating a line segment from 0 to target
+        {
+            double landa = 1.0 / (dist_to_target / NUM_STEPS);
+            for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+                opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target_in_world * step));
+        }
 
         // initial values for state ---
-        opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
-        opti.set_value(target_oparam, e2v(from_world_to_robot(target_in_world, current_tr, current_pose.alpha)));
+        auto target_oparam = opti_local.parameter(2);
+        auto initial_oparam = opti_local.parameter(3);
+        opti_local.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
+        opti_local.set_value(target_oparam, e2v(from_world_to_robot(target_in_world, current_tr, current_pose.alpha)));
+
+        // initial point constraints ------
+        opti_local.subject_to(state(all, 0) == initial_oparam);
+
+        // cost function
+        auto sum_dist = opti_local.parameter();
+        opti_local.set_value(sum_dist, 0.0);
+        for (auto k: iter::range(NUM_STEPS - 1))
+            sum_dist = casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
+        opti_local.minimize(sum_dist +
+                            casadi::MX::sumsqr(pos(all, -1) - target_oparam) +
+                            0.1 * casadi::MX::sumsqr(rot) +
+                            casadi::MX::sumsqr(adv));
 
         // obstacles
-        // self.compute_free_zones()
-        qInfo() << __FUNCTION__ << "in compute";
-        std::vector<Eigen::Vector2d> obs_points_in_robotSR(obs_points.size());             // [np.array(2)]*4
-        for( auto &&[i, p] : iter::enumerate(obs_points))
-            obs_points_in_robotSR[i] = from_world_to_robot(p, current_tr, current_pose.alpha);
-        auto lines = points_to_lines(obs_points_in_robotSR);
-        for(auto &&[i, l] : iter::enumerate(lines))
-            opti.set_value(obs_lines[i], l);
+        for (auto i: iter::range(1, NUM_STEPS - 1))
+        {
+            casadi::MX convex_or = opti_local.parameter();
+            opti_local.set_value(convex_or, false);
+            for (const auto &[lines, poly]: free_regions)
+            {
+                casadi::MX convex_and = opti_local.parameter();
+                opti_local.set_value(convex_and, true);
+                for (const auto &[A, B, C]: lines)
+                    convex_and = casadi::MX::logic_and((pos(0, i) * A + pos(1, i) * B + C) > 0, convex_and);
+                convex_or = casadi::MX::logic_or(convex_or, convex_and);
+            }
+            opti_local.subject_to(convex_or == true);
+        }
+
+//        auto lines = points_to_lines(convex_polygon, current_tr, current_pose.alpha);
+//        for(auto &&[i, l] : iter::enumerate(lines))
+//            opti_local.set_value(obs_lines[i], l);
+//        for(auto i : iter::range(1, NUM_STEPS-1))
+//        {
+//            casadi::MX convex_or = opti_local.parameter();
+//            opti_local.set_value(convex_or, false);
+//            for (auto l: obs_lines)
+//                convex_or = casadi::MX::logic_or((pos(0, i) * l(0) + pos(1, i) * l(1) + l(2)) > 0, convex_or);
+//            opti_local.subject_to(convex_or == true);
+//        }
 
         // solve NLP ------
         try
         {
-            auto solution = opti.solve();
-            previous_values = std::vector<double>(solution.value(state)); 
-
-            std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-            std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
+            auto solution = opti_local.solve();
+            std::string retstat = solution.stats().at("return_status");
+            if(retstat.compare("Solve_Succeeded") != 0)
+            {
+                std::cout << "NOT succeeded" << std::endl;
+                return;
+            }
+            previous_values = std::vector<double>(solution.value(state));
 
             // print output -----
+            std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+            std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
             auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
             auto rotation = std::vector<double>(solution.value(rot)).front();
             qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
+            qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
             // move the robot
@@ -161,18 +208,20 @@ void SpecificWorker::compute()
     }
 }
 
-void SpecificWorker::initialize_differential(const int N, const std::vector<double> &target_robot, const std::vector<double> &init_robot)
+// we define here only the fixed part of the problem
+casadi::Opti SpecificWorker::initialize_differential(const int N)
 {
     casadi::Slice all;
-    opti = casadi::Opti();
-
-    auto s_options = casadi::Dict();
-    auto p_options = casadi::Dict();
-    s_options["max_iter"] = 10000;
-    s_options["print_level"] = 0;
-    s_options["acceptable_tol"] = 1e-8;
-    s_options["acceptable_obj_change_tol"] = 1e-6;
-    opti.solver("ipopt", p_options, s_options);
+    auto opti = casadi::Opti();
+    auto specific_options = casadi::Dict();
+    auto generic_options = casadi::Dict();
+    //specific_options["ipopt.sb"] = "yes";
+    //specific_options["print_time"] = 0;
+    specific_options["max_iter"] = 10000;
+    specific_options["print_level"] = 0;
+    specific_options["acceptable_tol"] = 1e-8;
+    specific_options["acceptable_obj_change_tol"] = 1e-6;
+    opti.solver("ipopt", generic_options, specific_options);
 
     // ---- state variables ---------
     state = opti.variable(3, N+1);
@@ -184,49 +233,24 @@ void SpecificWorker::initialize_differential(const int N, const std::vector<doub
     adv = control(0, all);
     rot = control(1, all);
 
-    // initial and final state parameters
-    target_oparam = opti.parameter(2);
-    initial_oparam = opti.parameter(3);
+    auto target_oparam = opti.parameter(2);
+    auto initial_oparam = opti.parameter(3);
 
-    // lines
-    obs_lines = {opti.parameter(3), opti.parameter(3), opti.parameter(3), opti.parameter(3)};
-
-    std::vector<Eigen::Vector2d> obs_points_in_robotSR(obs_points.size());             // [np.array(2)]*4
-    RoboCompGenericBase::TBaseState current_pose;
-    differentialrobot_proxy->getBaseState(current_pose);
-    for( auto &&[i, p] : iter::enumerate(obs_points))
-        obs_points_in_robotSR[i] = from_world_to_robot(p, Eigen::Vector2d(current_pose.x/1000, current_pose.z/1000), current_pose.alpha);
-    auto lines = points_to_lines(obs_points_in_robotSR);
-    for(auto &&[i, l] : iter::enumerate(lines))
-        opti.set_value(obs_lines[i], l);
-
-    // target and init
-    opti.set_value(target_oparam, target_robot);
-    opti.set_value(initial_oparam, init_robot);
-
-    // cost function
-    auto sum_dist = opti.parameter();
-    opti.set_value(sum_dist, 0.0);
-    for(auto k : iter::range(N - 1))
-        sum_dist =  casadi::MX::sumsqr(pos(all, k+1) - pos(all, k));
-
-    //.minimize(sum_dist + 0.1*rot.sumsqr(rot) + adv.sumsqr(adv) + sqrt(pow(pos(all,-1) - target_oparam, 2)));
-    opti.minimize(sum_dist +
-                  casadi::MX::sumsqr(pos(all,-1) - target_oparam) +
-                  0.1 * casadi::MX::sumsqr(rot) +
-                  casadi::MX::sumsqr(adv));
-
-    // dynamic constraints for differential robot: dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
+    // Gap closing: dynamic constraints for differential robot: dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
     auto integrate = [](casadi::MX phi, casadi::MX u) { return casadi::MX::mtimes(
                                                     casadi::MX::vertcat(std::vector<casadi::MX>{
                                                     casadi::MX::horzcat(std::vector<casadi::MX>{sin(phi), 0.0}),
                                                     casadi::MX::horzcat(std::vector<casadi::MX>{cos(phi), 0.0}),
                                                     casadi::MX::horzcat(std::vector<casadi::MX>{0.0,      1.0})}
                                                 ), u);};
-    double dt = 0.5;   // timer interval in secs
+    double dt = 1;   // timer interval in secs
     for(const auto k : iter::range(N))  // loop over control intervals
     {
-        //auto step = casadi::MX::vertcat(std::vector<casadi::MX>{sin(phi(k)) * adv(k), cos(phi(k)) * adv(k), rot(k)});
+//        auto k1 = integrate(phi(k), control(all,k));
+//        auto k2 = integrate(phi(k) + (dt/2)*k1, control[all, k]);
+//        auto k3 = integrate(phi(k) + (dt/2)*k2, control[all, k]);
+//        auto k4 = integrate(phi(k) + k3, control[all, k]);
+//        auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
         auto x_next = state(all, k) + dt * integrate(phi(k), control(all,k));
         opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
     }
@@ -235,21 +259,10 @@ void SpecificWorker::initialize_differential(const int N, const std::vector<doub
     opti.subject_to(opti.bounded(-0.5, adv, 0.5));  // control is limited meters
     opti.subject_to(opti.bounded(-1, rot, 1));         // control is limited
 
-    // initial point constraints ------
-    opti.subject_to(state(all,0) == initial_oparam);
-
     // forward velocity constraints -----------
     opti.subject_to(adv >= 0);
 
-//    // obstacle constraints
-//    for(auto i : iter::range(3, N-5))
-//        for(auto l : obs_lines)
-//            opti.subject_to(pos(0,i)*l(0) + pos(1,i)*l(1) + l(2) >= 0.5);
-
-    for(auto i : iter::range(1, N-1))
-        for(auto l : obs_lines)
-            opti.subject_to(pos(0, i)*l(0) + pos(1, i)*l(1)  >= 0);
-
+    return opti;
 }
 /////////////////////////////////////////////////////////////////////////////////////////
 Eigen::Vector2d SpecificWorker::from_robot_to_world(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang)
@@ -280,13 +293,18 @@ void SpecificWorker::move_robot(float adv, float rot, float side)
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
 }
-std::vector<std::vector<double>> SpecificWorker::points_to_lines(const std::vector<Eigen::Vector2d> &points_in_robot)
+std::vector<std::vector<double>> SpecificWorker::points_to_lines(const std::vector<Eigen::Vector2d> &convex_polygon,
+                                                                 const Eigen::Vector2d &tr, double alpha)
 {
-    std::vector<std::vector<double>> lines(points_in_robot.size());
-    for(auto i :  iter::range(points_in_robot.size()))
+    std::vector<Eigen::Vector2d> convex_polygon_in_robot(convex_polygon.size());
+    for( auto &&[i, p] : iter::enumerate(convex_polygon))
+        convex_polygon_in_robot[i] = from_world_to_robot(p, tr, alpha);
+
+    std::vector<std::vector<double>> lines(convex_polygon_in_robot.size());
+    for(auto i :  iter::range(convex_polygon_in_robot.size()))
     {
-        auto p1 = points_in_robot[i];
-        auto p2 = points_in_robot[(i + 1) % points_in_robot.size()];
+        auto p1 = convex_polygon_in_robot[i];
+        auto p2 = convex_polygon_in_robot[(i + 1) % convex_polygon_in_robot.size()];
         auto norm = (p1 - p2).norm();
         auto A = (p1[1] - p2[1]) / norm;
         auto B = (p2[0] - p1[0]) / norm;
@@ -305,7 +323,6 @@ std::tuple<QPolygonF, QPolygonF> SpecificWorker::read_laser(const Eigen::Vector2
 
         // Simplify laser contour with Ramer-Douglas-Peucker
         poly_robot = ramer_douglas_peucker(ldata, MAX_RDP_DEVIATION_mm);
-        qInfo() << __FUNCTION__ << "laser" << poly_robot.size();
 
                 // compute poly_world
         poly_world.resize(poly_robot.size());
@@ -317,6 +334,21 @@ std::tuple<QPolygonF, QPolygonF> SpecificWorker::read_laser(const Eigen::Vector2
     }
     catch (const Ice::Exception &e) { std::cout << e.what() << std::endl; }
     return std::make_tuple(poly_robot, poly_world);
+}
+std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> SpecificWorker::read_base()
+{
+    RoboCompGenericBase::TBaseState current_pose;
+    Eigen::Vector2d current_tr;
+    try
+    {
+        //currentPose = self.omnirobot_proxy.getBaseState()
+        differentialrobot_proxy->getBaseState(current_pose);
+        current_tr[0] = current_pose.x / 1000; current_tr[1] = current_pose.z / 1000;
+        robot_polygon->setRotation(current_pose.alpha * 180 / M_PI);
+        robot_polygon->setPos(current_pose.x, current_pose.z);
+    }
+    catch(const Ice::Exception &e){ qInfo() << "Error connecting to base"; std::cout << e.what() << std::endl;}
+    return std::make_tuple(current_pose, current_tr);
 }
 void SpecificWorker::draw_laser(const QPolygonF &poly_world) // robot coordinates
 {
@@ -347,7 +379,7 @@ void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vec
         path_paint.back()->setZValue(30);
     }
 }
-SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &poly_robot)  //robot coordinates
+SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &poly_robot)
 {
     TPPLPartition partition;
     TPPLPoly poly_part;
@@ -504,47 +536,6 @@ int SpecificWorker::startup_check()
 	QTimer::singleShot(200, qApp, SLOT(quit()));
 	return 0;
 }
-
-/**************************************/
-// From the RoboCompDifferentialRobot you can call this methods:
-// this->differentialrobot_proxy->correctOdometer(...)
-// this->differentialrobot_proxy->getBasePose(...)
-// this->differentialrobot_proxy->getBaseState(...)
-// this->differentialrobot_proxy->resetOdometer(...)
-// this->differentialrobot_proxy->setOdometer(...)
-// this->differentialrobot_proxy->setOdometerPose(...)
-// this->differentialrobot_proxy->setSpeedBase(...)
-// this->differentialrobot_proxy->stopBase(...)
-
-/**************************************/
-// From the RoboCompDifferentialRobot you can use this types:
-// RoboCompDifferentialRobot::TMechParams
-
-/**************************************/
-// From the RoboCompLaser you can call this methods:
-// this->laser_proxy->getLaserAndBStateData(...)
-// this->laser_proxy->getLaserConfData(...)
-// this->laser_proxy->getLaserData(...)
-
-/**************************************/
-// From the RoboCompLaser you can use this types:
-// RoboCompLaser::LaserConfData
-// RoboCompLaser::TData
-
-/**************************************/
-// From the RoboCompOmniRobot you can call this methods:
-// this->omnirobot_proxy->correctOdometer(...)
-// this->omnirobot_proxy->getBasePose(...)
-// this->omnirobot_proxy->getBaseState(...)
-// this->omnirobot_proxy->resetOdometer(...)
-// this->omnirobot_proxy->setOdometer(...)
-// this->omnirobot_proxy->setOdometerPose(...)
-// this->omnirobot_proxy->setSpeedBase(...)
-// this->omnirobot_proxy->stopBase(...)
-
-/**************************************/
-// From the RoboCompOmniRobot you can use this types:
-// RoboCompOmniRobot::TMechParams
 
 //void SpecificWorker::initialize_acado()
 //{
