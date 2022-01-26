@@ -86,17 +86,17 @@ void SpecificWorker::compute()
     auto &&[laser_poly_robot, laser_poly_world] = read_laser(current_tr, current_pose.alpha);
     auto free_regions = compute_laser_partitions(laser_poly_robot);
     // select region with robot inside
-    Lines robot_lines;
-    for(const auto &[lines, poly] : free_regions)
-    {
-        bool inside = true;
-        for (const auto &[A, B, C]: lines)
-            if ((inside = inside and C) > 0) // since ABC were computed in the robot's coordinate frame
-            {
-                robot_lines = lines;
-                break;
-            }
-    }
+//    Lines robot_lines;
+//    for(const auto &[lines, poly] : free_regions)
+//    {
+//        bool inside = true;
+//        for (const auto &[A, B, C]: lines)
+//            if ((inside = inside and C) > 0) // since ABC were computed in the robot's coordinate frame
+//            {
+//                robot_lines = lines;
+//                break;
+//            }
+//    }
     draw_partitions(free_regions, QColor("Magenta"));
 
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -137,10 +137,10 @@ void SpecificWorker::compute()
         opti_local.set_value(sum_dist, 0.0);
         for (auto k: iter::range(NUM_STEPS - 1))
             sum_dist = casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
-        opti_local.minimize(sum_dist +
-                            casadi::MX::sumsqr(pos(all, -1) - target_oparam) +
-                            0.1 * casadi::MX::sumsqr(rot) +
-                            casadi::MX::sumsqr(adv));
+        opti_local.minimize(/*sum_dist +*/
+                            casadi::MX::sumsqr(pos(all, -1) - target_oparam)
+                            /*0.1 * casadi::MX::sumsqr(rot)*/
+                            /*casadi::MX::sumsqr(adv)*/);
 
         // obstacles
         for (auto i: iter::range(1, NUM_STEPS - 1))
@@ -152,7 +152,7 @@ void SpecificWorker::compute()
                 casadi::MX convex_and = opti_local.parameter();
                 opti_local.set_value(convex_and, true);
                 for (const auto &[A, B, C]: lines)
-                    convex_and = casadi::MX::logic_and((pos(0, i) * A + pos(1, i) * B + C) > 0, convex_and);
+                    convex_and = casadi::MX::logic_and((pos(0, i) * A + pos(1, i) * B + C) > 0.01, convex_and);
                 convex_or = casadi::MX::logic_or(convex_or, convex_and);
             }
             opti_local.subject_to(convex_or == true);
@@ -217,10 +217,10 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     auto generic_options = casadi::Dict();
     //specific_options["ipopt.sb"] = "yes";
     //specific_options["print_time"] = 0;
-    specific_options["max_iter"] = 10000;
+    //specific_options["max_iter"] = 10000;
     specific_options["print_level"] = 0;
-    specific_options["acceptable_tol"] = 1e-8;
-    specific_options["acceptable_obj_change_tol"] = 1e-6;
+    //specific_options["acceptable_tol"] = 1e-8;
+    //specific_options["acceptable_obj_change_tol"] = 1e-6;
     opti.solver("ipopt", generic_options, specific_options);
 
     // ---- state variables ---------
@@ -237,21 +237,21 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     auto initial_oparam = opti.parameter(3);
 
     // Gap closing: dynamic constraints for differential robot: dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
-    auto integrate = [](casadi::MX phi, casadi::MX u) { return casadi::MX::mtimes(
+    auto integrate = [](casadi::MX x, casadi::MX u) { return casadi::MX::mtimes(
                                                     casadi::MX::vertcat(std::vector<casadi::MX>{
-                                                    casadi::MX::horzcat(std::vector<casadi::MX>{sin(phi), 0.0}),
-                                                    casadi::MX::horzcat(std::vector<casadi::MX>{cos(phi), 0.0}),
+                                                    casadi::MX::horzcat(std::vector<casadi::MX>{casadi::MX::sin(x(2)), 0.0}),
+                                                    casadi::MX::horzcat(std::vector<casadi::MX>{casadi::MX::cos(x(2)), 0.0}),
                                                     casadi::MX::horzcat(std::vector<casadi::MX>{0.0,      1.0})}
                                                 ), u);};
-    double dt = 1;   // timer interval in secs
+    double dt = 2;   // timer interval in secs
     for(const auto k : iter::range(N))  // loop over control intervals
     {
-//        auto k1 = integrate(phi(k), control(all,k));
-//        auto k2 = integrate(phi(k) + (dt/2)*k1, control[all, k]);
-//        auto k3 = integrate(phi(k) + (dt/2)*k2, control[all, k]);
-//        auto k4 = integrate(phi(k) + k3, control[all, k]);
-//        auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
-        auto x_next = state(all, k) + dt * integrate(phi(k), control(all,k));
+        auto k1 = integrate(state(all, k), control(all,k));
+        auto k2 = integrate(state(all,k) + (dt/2)* k1 , control(all, k));
+        auto k3 = integrate(state(all,k) + (dt/2)*k2, control(all, k));
+        auto k4 = integrate(state(all,k) + k3, control(all, k));
+        auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
+//        auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
         opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
     }
 
