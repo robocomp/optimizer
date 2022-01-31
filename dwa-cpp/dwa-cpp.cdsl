@@ -1,0 +1,15 @@
+import "OmniRobot.idsl";
+import "Laser.idsl";
+import "DifferentialRobot.idsl";
+import "BillCoppelia.idsl";
+
+Component dwa_cpp
+{
+    Communications
+    {
+        requires OmniRobot, Laser, DifferentialRobot, BillCoppelia;
+    };
+    language Cpp11;
+    gui Qt(QWidget);
+};
+
