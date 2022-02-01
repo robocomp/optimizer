@@ -5,7 +5,7 @@
 #define USE_QTGUI
 
 
-#define PROGRAM_NAME    "comp_casadi_python"
-#define SERVER_FULL_NAME   "RoboComp comp_casadi_python:: comp_casadi_python"
+#define PROGRAM_NAME    "comp_casadi_cpp"
+#define SERVER_FULL_NAME   "RoboComp comp_casadi_cpp:: comp_casadi_cpp"
 
 #endif

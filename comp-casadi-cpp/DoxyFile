@@ -18,7 +18,7 @@
 DOXYFILE_ENCODING      = UTF-8
 
 # ROBOCOMP
-PROJECT_NAME           = comp_casadi_python
+PROJECT_NAME           = comp_casadi_cpp
 PROJECT_NUMBER         =
 
 

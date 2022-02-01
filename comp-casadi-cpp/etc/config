@@ -4,6 +4,7 @@ CommonBehavior.Endpoints=tcp -p 17000
 LaserProxy = laser:tcp -h localhost -p 10003
 DifferentialRobotProxy = differentialrobot:tcp -h localhost -p 10004
 OmniRobotProxy = omnirobot:tcp -h localhost -p 10005
+BillCoppeliaProxy = billcoppelia:tcp -h localhost -p 11046
 
 
 Ice.Warn.Connections=0

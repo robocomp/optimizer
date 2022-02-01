@@ -22,6 +22,7 @@
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
 #include <cppitertools/chunked.hpp>
+#include <cppitertools/sliding_window.hpp>
 
 /**
 * \brief Default constructor
@@ -59,12 +60,17 @@ void SpecificWorker::initialize(int period)
         laser_in_robot_polygon->setPos(0, 190);     // move this to abstract
         this->resize(700,450);
 
-        target_in_world = {0, 2}; //meters
         std::vector<double> init_robot{0, 0, 0};
-        NUM_STEPS = 20;
+        NUM_STEPS = 12;
 
-        convex_polygon = {{-0.5, 0.5}, {0.5, 0.5}, {0.5, -0.5}, {-0.5, -0.5}};
         opti = initialize_differential(NUM_STEPS);
+
+        connect(viewer_robot, &AbstractGraphicViewer::new_mouse_coordinates, [this](QPointF p) mutable
+                            {
+                                qInfo() << __FUNCTION__ << " Received new target at " << p;
+                                target.pos = p;
+                                target.active = true;
+                            });
 
         //timer.setSingleShot(true);
         timer.start(Period);
@@ -83,32 +89,29 @@ void SpecificWorker::compute()
     auto [current_pose, current_tr] = read_base();
 
     // laser
-    auto &&[laser_poly_robot, laser_poly_world] = read_laser(current_tr, current_pose.alpha);
+    auto &&[laser_poly_robot, laser_poly_world, ldata] = read_laser(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
     auto free_regions = compute_laser_partitions(laser_poly_robot);
-    // select region with robot inside
-//    Lines robot_lines;
-//    for(const auto &[lines, poly] : free_regions)
-//    {
-//        bool inside = true;
-//        for (const auto &[A, B, C]: lines)
-//            if ((inside = inside and C) > 0) // since ABC were computed in the robot's coordinate frame
-//            {
-//                robot_lines = lines;
-//                break;
-//            }
-//    }
     draw_partitions(free_regions, QColor("Magenta"));
 
+    // Bill
+    //if(auto t = read_bill(); t.has_value())
+    //    target = t.value();
+    // project target on closest laser perimeter point
+    if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
+                                                        Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
+                                                        ldata,
+                                                        laser_poly_robot); t.has_value())
+    {
+        target.pos = e2q(from_robot_to_world(t.value()/1000.0, current_tr, current_pose.alpha));
+    }
+
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    double dist_to_target = (current_tr - target_in_world).norm();
-    if( this->active and dist_to_target > 0.15)
+    double dist_to_target = (current_tr - target.to_eigen_meters()).norm();
+    if( target.active and dist_to_target > 0.15)
     {
         // recompute the length of the optimization path if close to target
 //        if(dist_to_target < 2)
-//        {
-//            initialize_differential(10, e2v(from_world_to_robot(target_in_world, current_tr, current_pose.alpha)),
-//                                    std::vector<double>{0, 0, 0});
-//
+//            initialize_differential(10);
 //       else
         // Warm start
         if (not previous_values.empty())
@@ -120,14 +123,17 @@ void SpecificWorker::compute()
         {
             double landa = 1.0 / (dist_to_target / NUM_STEPS);
             for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
-                opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target_in_world * step));
+            {
+                opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
+                opti_local.set_initial(state(2, i), 0.0);
+            }
         }
 
         // initial values for state ---
         auto target_oparam = opti_local.parameter(2);
         auto initial_oparam = opti_local.parameter(3);
         opti_local.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
-        opti_local.set_value(target_oparam, e2v(from_world_to_robot(target_in_world, current_tr, current_pose.alpha)));
+        opti_local.set_value(target_oparam, e2v(from_world_to_robot(target.to_eigen_meters(), current_tr, current_pose.alpha)));
 
         // initial point constraints ------
         opti_local.subject_to(state(all, 0) == initial_oparam);
@@ -135,41 +141,34 @@ void SpecificWorker::compute()
         // cost function
         auto sum_dist = opti_local.parameter();
         opti_local.set_value(sum_dist, 0.0);
-        for (auto k: iter::range(NUM_STEPS - 1))
-            sum_dist = casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
-        opti_local.minimize(/*sum_dist +*/
-                            casadi::MX::sumsqr(pos(all, -1) - target_oparam)
+        for (auto k: iter::range(NUM_STEPS))
+            sum_dist += casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
+        opti_local.minimize(0.001 * sum_dist +
+                             casadi::MX::sumsqr(pos(all, -1) - target_oparam)
                             /*0.1 * casadi::MX::sumsqr(rot)*/
                             /*casadi::MX::sumsqr(adv)*/);
 
         // obstacles
-        for (auto i: iter::range(1, NUM_STEPS - 1))
+        double DW = 0.3;
+        //double DL = 0.2;
+        std::vector<std::vector<double>> desp = {{DW, 0}, { -DW, 0}};
+        for (auto i: iter::range(3, NUM_STEPS))
         {
-            casadi::MX convex_or = opti_local.parameter();
-            opti_local.set_value(convex_or, false);
-            for (const auto &[lines, poly]: free_regions)
+            for( auto &d: desp)
             {
-                casadi::MX convex_and = opti_local.parameter();
-                opti_local.set_value(convex_and, true);
-                for (const auto &[A, B, C]: lines)
-                    convex_and = casadi::MX::logic_and((pos(0, i) * A + pos(1, i) * B + C) > 0.01, convex_and);
-                convex_or = casadi::MX::logic_or(convex_or, convex_and);
+                casadi::MX convex_or = opti_local.parameter();
+                opti_local.set_value(convex_or, false);
+                for (const auto &[lines, poly]: free_regions)
+                {
+                    casadi::MX convex_and = opti_local.parameter();
+                    opti_local.set_value(convex_and, true);
+                    for (const auto &[A, B, C]: lines)
+                        convex_and = casadi::MX::logic_and(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) > 0, convex_and);
+                    convex_or = casadi::MX::logic_or(convex_or, convex_and);
+                }
+                opti_local.subject_to(convex_or == true);
             }
-            opti_local.subject_to(convex_or == true);
         }
-
-//        auto lines = points_to_lines(convex_polygon, current_tr, current_pose.alpha);
-//        for(auto &&[i, l] : iter::enumerate(lines))
-//            opti_local.set_value(obs_lines[i], l);
-//        for(auto i : iter::range(1, NUM_STEPS-1))
-//        {
-//            casadi::MX convex_or = opti_local.parameter();
-//            opti_local.set_value(convex_or, false);
-//            for (auto l: obs_lines)
-//                convex_or = casadi::MX::logic_or((pos(0, i) * l(0) + pos(1, i) * l(1) + l(2)) > 0, convex_or);
-//            opti_local.subject_to(convex_or == true);
-//        }
-
         // solve NLP ------
         try
         {
@@ -192,7 +191,8 @@ void SpecificWorker::compute()
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
             // move the robot
-            //move_robot(advance *3, rotation);
+            auto factor = std::clamp(3.0*dist_to_target, 0.0, 3.0);
+            move_robot(advance*factor, rotation);
 
             // draw
             auto path = std::vector<double>(solution.value(pos));
@@ -203,7 +203,7 @@ void SpecificWorker::compute()
     else  // at  target
     {
         move_robot(0, 0);
-        active = false;
+        target.active = false;
         qInfo() << __FUNCTION__ << "Stopping";
     }
 }
@@ -215,7 +215,8 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     auto opti = casadi::Opti();
     auto specific_options = casadi::Dict();
     auto generic_options = casadi::Dict();
-    //specific_options["ipopt.sb"] = "yes";
+    specific_options["accept_after_max_steps"] = 100;
+    specific_options["fixed_variable_treatment"] = "relax_bounds";
     //specific_options["print_time"] = 0;
     //specific_options["max_iter"] = 10000;
     specific_options["print_level"] = 0;
@@ -265,6 +266,35 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     return opti;
 }
 /////////////////////////////////////////////////////////////////////////////////////////
+std::optional<Eigen::Vector2d> SpecificWorker::find_inside_target(const Eigen::Vector2d &target_in_robot,
+                                                                  const RoboCompLaser::TLaserData &ldata,
+                                                                  const QPolygonF &poly)
+{
+    if(poly.containsPoint(e2q(target_in_robot), Qt::WindingFill))
+        return {};
+    std::vector<std::tuple<Eigen::Vector2d, double, Eigen::ParametrizedLine<double, 2>>> candidates;
+    for(auto &&par : iter::sliding_window(ldata, 2))
+    {
+        Eigen::Vector2d p1(par[0].dist*sin(par[0].angle), par[0].dist*sin(par[0].angle));
+        Eigen::Vector2d p2(par[1].dist*sin(par[1].angle), par[1].dist*sin(par[1].angle));
+        double dist = (p1-p2).norm();
+        auto line = Eigen::ParametrizedLine<double, 2>::Through(p1, p2);
+        auto proj = line.projection(target_in_robot);
+        if(((proj-p1).norm() > dist) or ((proj-p2).norm() > dist))
+            break; // proy outside p1-p2 segment
+        else
+            candidates.push_back(std::make_tuple(proj, line.squaredDistance(target_in_robot), Eigen::ParametrizedLine<double, 2>::Through(target_in_robot, proj)));
+    }
+    qInfo() << __FUNCTION__ << candidates.empty() << candidates.size();
+    if(not candidates.empty())
+    {
+        auto min_it = std::ranges::min_element(candidates, [](auto a, auto b){return std::get<double>(a) < std::get<double>(b);});
+        Eigen::Vector2d new_t = std::get<2>(*min_it).pointAt(std::get<double>(*min_it) + 10);
+        return new_t;
+    }
+    else
+        return {};
+}
 Eigen::Vector2d SpecificWorker::from_robot_to_world(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang)
 {
     Eigen::Matrix2d matrix;
@@ -293,38 +323,18 @@ void SpecificWorker::move_robot(float adv, float rot, float side)
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
 }
-std::vector<std::vector<double>> SpecificWorker::points_to_lines(const std::vector<Eigen::Vector2d> &convex_polygon,
-                                                                 const Eigen::Vector2d &tr, double alpha)
-{
-    std::vector<Eigen::Vector2d> convex_polygon_in_robot(convex_polygon.size());
-    for( auto &&[i, p] : iter::enumerate(convex_polygon))
-        convex_polygon_in_robot[i] = from_world_to_robot(p, tr, alpha);
-
-    std::vector<std::vector<double>> lines(convex_polygon_in_robot.size());
-    for(auto i :  iter::range(convex_polygon_in_robot.size()))
-    {
-        auto p1 = convex_polygon_in_robot[i];
-        auto p2 = convex_polygon_in_robot[(i + 1) % convex_polygon_in_robot.size()];
-        auto norm = (p1 - p2).norm();
-        auto A = (p1[1] - p2[1]) / norm;
-        auto B = (p2[0] - p1[0]) / norm;
-        auto C = -((p1[1] - p2[1]) * p1[0] + (p2[0] - p1[0]) * p1[1]) / norm;
-        lines[i] = {A, B, C};
-    }
-    return lines;
-}
-std::tuple<QPolygonF, QPolygonF> SpecificWorker::read_laser(const Eigen::Vector2d &robot_tr, double robot_angle)
+std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> SpecificWorker::read_laser(const Eigen::Vector2d &robot_tr, double robot_angle)
 {
     QPolygonF poly_robot, poly_world;
+    RoboCompLaser::TLaserData ldata;
     const float MAX_RDP_DEVIATION_mm  =  70;
     try
     {
-        auto ldata = laser_proxy->getLaserData();
-
+        ldata = laser_proxy->getLaserData();
         // Simplify laser contour with Ramer-Douglas-Peucker
         poly_robot = ramer_douglas_peucker(ldata, MAX_RDP_DEVIATION_mm);
 
-                // compute poly_world
+        // compute poly_world
         poly_world.resize(poly_robot.size());
         for (auto &&[i, p] : poly_robot | iter::enumerate)
             poly_world[i] = e2q(from_robot_to_world(Eigen::Vector2d(p.x(), p.y()),  robot_tr, robot_angle));
@@ -333,7 +343,7 @@ std::tuple<QPolygonF, QPolygonF> SpecificWorker::read_laser(const Eigen::Vector2
         draw_laser(poly_robot);
     }
     catch (const Ice::Exception &e) { std::cout << e.what() << std::endl; }
-    return std::make_tuple(poly_robot, poly_world);
+    return std::make_tuple(poly_robot, poly_world, ldata);
 }
 std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> SpecificWorker::read_base()
 {
@@ -350,6 +360,22 @@ std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> SpecificWorker::rea
     catch(const Ice::Exception &e){ qInfo() << "Error connecting to base"; std::cout << e.what() << std::endl;}
     return std::make_tuple(current_pose, current_tr);
 }
+std::optional<SpecificWorker::Target> SpecificWorker::read_bill()
+{
+    Target my_target;
+    try
+    {
+        auto pose = billcoppelia_proxy->getPose();
+        my_target.pos = QPointF(pose.x, pose.y);
+    }
+    catch(const Ice::Exception &e)
+    {
+        qInfo() << "Error connecting to Bill Coppelia";
+        std::cout << e.what() << std::endl;
+        return {};
+    }
+    return my_target;
+}
 void SpecificWorker::draw_laser(const QPolygonF &poly_world) // robot coordinates
 {
     static QGraphicsItem *laser_polygon = nullptr;
@@ -361,7 +387,7 @@ void SpecificWorker::draw_laser(const QPolygonF &poly_world) // robot coordinate
     laser_polygon = viewer_robot->scene.addPolygon(laser_in_robot_polygon->mapToScene(poly_world), QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(3);
 }
-void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vector2d &tr_world, double rot)
+void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vector2d &tr_world, double my_rot)
 {
     static std::vector<QGraphicsEllipseItem *> path_paint;
     static QString path_color = "DarkBlue";
@@ -374,7 +400,7 @@ void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vec
     std::vector<Eigen::Vector2d> qpath(path.size()/2);
     for(auto &&[i, p] : iter::chunked(path, 2) | iter::enumerate)
     {
-        auto pw = from_robot_to_world(Eigen::Vector2d(p[0]*1000, p[1]*1000), tr_world, rot);
+        auto pw = from_robot_to_world(Eigen::Vector2d(p[0]*1000, p[1]*1000), tr_world, my_rot);
         path_paint.push_back(viewer_robot->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
         path_paint.back()->setZValue(30);
     }

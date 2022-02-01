@@ -18,11 +18,11 @@
  */
 
 
-/** \mainpage RoboComp::comp_casadi_python
+/** \mainpage RoboComp::comp_casadi_cpp
  *
  * \section intro_sec Introduction
  *
- * The comp_casadi_python component...
+ * The comp_casadi_cpp component...
  *
  * \section interface_sec Interface
  *
@@ -34,7 +34,7 @@
  * ...
  *
  * \subsection install2_ssec Compile and install
- * cd comp_casadi_python
+ * cd comp_casadi_cpp
  * <br>
  * cmake . && make
  * <br>
@@ -52,7 +52,7 @@
  *
  * \subsection execution_ssec Execution
  *
- * Just: "${PATH_TO_BINARY}/comp_casadi_python --Ice.Config=${PATH_TO_CONFIG_FILE}"
+ * Just: "${PATH_TO_BINARY}/comp_casadi_cpp --Ice.Config=${PATH_TO_CONFIG_FILE}"
  *
  * \subsection running_ssec Once running
  *
@@ -86,10 +86,10 @@
 
 
 
-class comp_casadi_python : public RoboComp::Application
+class comp_casadi_cpp : public RoboComp::Application
 {
 public:
-	comp_casadi_python (QString prfx, bool startup_check) { prefix = prfx.toStdString(); this->startup_check_flag=startup_check; }
+	comp_casadi_cpp (QString prfx, bool startup_check) { prefix = prfx.toStdString(); this->startup_check_flag=startup_check; }
 private:
 	void initialize();
 	std::string prefix;
@@ -100,14 +100,14 @@ public:
 	virtual int run(int, char*[]);
 };
 
-void ::comp_casadi_python::initialize()
+void ::comp_casadi_cpp::initialize()
 {
 	// Config file properties read example
 	// configGetString( PROPERTY_NAME_1, property1_holder, PROPERTY_1_DEFAULT_VALUE );
 	// configGetInt( PROPERTY_NAME_2, property1_holder, PROPERTY_2_DEFAULT_VALUE );
 }
 
-int ::comp_casadi_python::run(int argc, char* argv[])
+int ::comp_casadi_cpp::run(int argc, char* argv[])
 {
 #ifdef USE_QTGUI
 	QApplication a(argc, argv);  // GUI application
@@ -130,12 +130,29 @@ int ::comp_casadi_python::run(int argc, char* argv[])
 
 	int status=EXIT_SUCCESS;
 
+	RoboCompBillCoppelia::BillCoppeliaPrxPtr billcoppelia_proxy;
 	RoboCompDifferentialRobot::DifferentialRobotPrxPtr differentialrobot_proxy;
 	RoboCompLaser::LaserPrxPtr laser_proxy;
 	RoboCompOmniRobot::OmniRobotPrxPtr omnirobot_proxy;
 
 	string proxy, tmp;
 	initialize();
+
+	try
+	{
+		if (not GenericMonitor::configGetString(communicator(), prefix, "BillCoppeliaProxy", proxy, ""))
+		{
+			cout << "[" << PROGRAM_NAME << "]: Can't read configuration for proxy BillCoppeliaProxy\n";
+		}
+		billcoppelia_proxy = Ice::uncheckedCast<RoboCompBillCoppelia::BillCoppeliaPrx>( communicator()->stringToProxy( proxy ) );
+	}
+	catch(const Ice::Exception& ex)
+	{
+		cout << "[" << PROGRAM_NAME << "]: Exception creating proxy BillCoppelia: " << ex;
+		return EXIT_FAILURE;
+	}
+	rInfo("BillCoppeliaProxy initialized Ok!");
+
 
 	try
 	{
@@ -185,7 +202,7 @@ int ::comp_casadi_python::run(int argc, char* argv[])
 	rInfo("OmniRobotProxy initialized Ok!");
 
 
-	tprx = std::make_tuple(differentialrobot_proxy,laser_proxy,omnirobot_proxy);
+	tprx = std::make_tuple(billcoppelia_proxy,differentialrobot_proxy,laser_proxy,omnirobot_proxy);
 	SpecificWorker *worker = new SpecificWorker(tprx, startup_check_flag);
 	//Monitor thread
 	SpecificMonitor *monitor = new SpecificMonitor(worker,communicator());
@@ -302,7 +319,7 @@ int main(int argc, char* argv[])
 		}
 
 	}
-	::comp_casadi_python app(prefix, startup_check_flag);
+	::comp_casadi_cpp app(prefix, startup_check_flag);
 
 	return app.main(argc, argv, configFile.toLocal8Bit().data());
 }

@@ -37,43 +37,35 @@
 #include <casadi/core/optistack.hpp>
 #include <abstract_graphic_viewer/abstract_graphic_viewer.h>
 #include "polypartition.h"
-
+//#include <template_utilities/template_utilities.h>
 
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
 public:
     SpecificWorker(TuplePrx tprx, bool startup_check);
-
-    ~SpecificWorker();
-
-    bool setParams(RoboCompCommonBehavior::ParameterList params);
+    ~SpecificWorker() override;
+    bool setParams(RoboCompCommonBehavior::ParameterList params) override;
 
 public slots:
 
-    void compute();
-
+    void compute() override;
     int startup_check();
-
-    void initialize(int period);
-
+    void initialize(int period) override;
     void new_target_slot(QPointF);
 
 private:
     bool startup_check_flag;
     AbstractGraphicViewer *viewer_robot;
     casadi::Opti initialize_differential(const int N);
-    std::vector<std::vector<double>> points_to_lines(const std::vector<Eigen::Vector2d> &points_in_robot,
-                                                     const Eigen::Vector2d &tr, double alpha);
     void move_robot(float adv, float rot, float side = 0);
     std::vector<double> e2v(const Eigen::Vector2d &v);
     QPointF e2q(const Eigen::Vector2d &v);
     Eigen::Vector2d from_robot_to_world(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang);
     Eigen::Vector2d from_world_to_robot(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang);
-    void draw_path(const std::vector<double> &path,  const Eigen::Vector2d &tr_world, double robot_ang);
+    void draw_path(const std::vector<double> &path,  const Eigen::Vector2d &tr_world, double my_rot);
 
-    Eigen::Vector2d target_in_world;
-    bool active = true;
+
     casadi::Opti opti;
     int NUM_STEPS;
     casadi::MX state;
@@ -89,16 +81,18 @@ private:
     QGraphicsPolygonItem *robot_polygon;
     QGraphicsRectItem *laser_in_robot_polygon;
     void draw_laser(const QPolygonF &poly_robot);
-    std::tuple<QPolygonF, QPolygonF> read_laser(const Eigen::Vector2d &robot_tr, double robot_angle);
+    std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> read_base();
+    std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> read_laser(const Eigen::Vector2d &robot_tr, double robot_angle);
 
     // target
     struct Target
     {
-        bool active = false;
-        QPointF pos;
-        Eigen::Vector2f to_eigen() const
-        { return Eigen::Vector2f(pos.x(), pos.y()); }
-
+        bool active = true;
+        QPointF pos; //mm
+        Eigen::Vector2d to_eigen() const
+        { return Eigen::Vector2d(pos.x(), pos.y()); }
+        Eigen::Vector2d to_eigen_meters() const
+        { return Eigen::Vector2d(pos.x()/1000, pos.y()/1000); }
         QGraphicsEllipseItem *draw = nullptr;
     };
     Target target;
@@ -107,12 +101,13 @@ private:
     using Point = std::pair<float, float>;  //only for RDP, change to QPointF
     using Lines = std::vector<std::tuple<float, float, float>>;
     using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
-    std::vector<tuple<Lines, QPolygonF>> world_free_regions;
+    std::optional<Eigen::Vector2d> find_inside_target(const Eigen::Vector2d &target_in_robot, const RoboCompLaser::TLaserData &ldata, const QPolygonF &poly);
     Obstacles compute_laser_partitions(QPolygonF &laser_poly);
     QPolygonF ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon);
     void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
     void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
 
-    tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> read_base();
+    // Bill
+    std::optional<Target> read_bill();
 };
 #endif

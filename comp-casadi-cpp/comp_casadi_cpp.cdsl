@@ -1,12 +1,13 @@
 import "OmniRobot.idsl";
 import "Laser.idsl";
 import "DifferentialRobot.idsl";
+import "BillCoppelia.idsl";
 
 Component comp_casadi_cpp
 {
     Communications
     {
-        requires OmniRobot, Laser, DifferentialRobot;
+        requires OmniRobot, Laser, DifferentialRobot, BillCoppelia;
     };
     language Cpp11;
     gui Qt(QWidget);
