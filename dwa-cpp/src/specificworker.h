@@ -28,25 +28,29 @@
 #define SPECIFICWORKER_H
 
 #include <genericworker.h>
-#include <innermodel/innermodel.h>
+#include "dynamic_window.h"
 
 class SpecificWorker : public GenericWorker
 {
-Q_OBJECT
-public:
-	SpecificWorker(TuplePrx tprx, bool startup_check);
-	~SpecificWorker();
-	bool setParams(RoboCompCommonBehavior::ParameterList params);
+    Q_OBJECT
+    public:
+        SpecificWorker(TuplePrx tprx, bool startup_check);
+        ~SpecificWorker();
+        bool setParams(RoboCompCommonBehavior::ParameterList params);
 
+    public slots:
+        void compute();
+        int startup_check();
+        void initialize(int period);
 
-
-public slots:
-	void compute();
-	int startup_check();
-	void initialize(int period);
-private:
-	std::shared_ptr < InnerModel > innerModel;
-	bool startup_check_flag;
+    private:
+        bool startup_check_flag;
+        std::tuple<RoboCompFullPoseEstimation::FullPoseEuler, double, double> read_base();
+        QPolygonF read_laser();
+        using Point = std::pair<float, float>;  //only for RDP, change to QPointF
+        QPolygonF ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon);
+        void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
+        Dynamic_Window dwa;
 
 };
 

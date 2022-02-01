@@ -31,8 +31,8 @@
 #include <ui_mainUI.h>
 #include <CommonBehavior.h>
 
-#include <BillCoppelia.h>
 #include <DifferentialRobot.h>
+#include <FullPoseEstimation.h>
 #include <GenericBase.h>
 #include <Laser.h>
 #include <OmniRobot.h>
@@ -42,7 +42,7 @@
 #define BASIC_PERIOD 100
 
 
-using TuplePrx = std::tuple<RoboCompBillCoppelia::BillCoppeliaPrxPtr,RoboCompDifferentialRobot::DifferentialRobotPrxPtr,RoboCompLaser::LaserPrxPtr,RoboCompOmniRobot::OmniRobotPrxPtr>;
+using TuplePrx = std::tuple<RoboCompDifferentialRobot::DifferentialRobotPrxPtr,RoboCompFullPoseEstimation::FullPoseEstimationPrxPtr,RoboCompLaser::LaserPrxPtr,RoboCompOmniRobot::OmniRobotPrxPtr>;
 
 
 class GenericWorker : public QWidget, public Ui_guiDlg
@@ -58,8 +58,8 @@ public:
 	QMutex *mutex;
 
 
-	RoboCompBillCoppelia::BillCoppeliaPrxPtr billcoppelia_proxy;
 	RoboCompDifferentialRobot::DifferentialRobotPrxPtr differentialrobot_proxy;
+	RoboCompFullPoseEstimation::FullPoseEstimationPrxPtr fullposeestimation_proxy;
 	RoboCompLaser::LaserPrxPtr laser_proxy;
 	RoboCompOmniRobot::OmniRobotPrxPtr omnirobot_proxy;
 

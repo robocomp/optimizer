@@ -23,8 +23,8 @@
 GenericWorker::GenericWorker(TuplePrx tprx) : Ui_guiDlg()
 {
 
-	billcoppelia_proxy = std::get<0>(tprx);
-	differentialrobot_proxy = std::get<1>(tprx);
+	differentialrobot_proxy = std::get<0>(tprx);
+	fullposeestimation_proxy = std::get<1>(tprx);
 	laser_proxy = std::get<2>(tprx);
 	omnirobot_proxy = std::get<3>(tprx);
 

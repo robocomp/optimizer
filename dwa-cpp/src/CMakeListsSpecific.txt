@@ -2,6 +2,7 @@
 SET ( SOURCES
   specificworker.cpp
   specificmonitor.cpp
+  dynamic_window.cpp
 )
 
 # Headers set
@@ -10,7 +11,8 @@ SET ( HEADERS
   specificmonitor.h
 )
 
-
+set(CMAKE_CXX_STANDARD 20)
+add_definitions(-O3 -march=native  -fmax-errors=5 )
 SET (LIBS ${LIBS}  )
 
 

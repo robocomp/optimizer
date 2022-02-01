@@ -1,13 +1,13 @@
 import "OmniRobot.idsl";
 import "Laser.idsl";
 import "DifferentialRobot.idsl";
-import "BillCoppelia.idsl";
+import "FullPoseEstimation.idsl";
 
 Component dwa_cpp
 {
     Communications
     {
-        requires OmniRobot, Laser, DifferentialRobot, BillCoppelia;
+        requires OmniRobot, Laser, DifferentialRobot, FullPoseEstimation;
     };
     language Cpp11;
     gui Qt(QWidget);
