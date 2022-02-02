@@ -29,6 +29,7 @@
 
 #include <genericworker.h>
 #include "dynamic_window.h"
+#include <abstract_graphic_viewer/abstract_graphic_viewer.h>
 
 class SpecificWorker : public GenericWorker
 {
@@ -44,6 +45,19 @@ class SpecificWorker : public GenericWorker
         void initialize(int period);
 
     private:
+        struct Constants
+        {
+            const float max_advance_speed = 800;
+            const float tile_size = 100;
+            const float max_laser_range = 4000;
+            float current_rot_speed = 0;
+            float current_adv_speed = 0;
+            float robot_length = 450;
+            const float robot_semi_length = robot_length/2.0;
+            const float final_distance_to_target = 150; //mm
+        };
+        Constants constants;
+
         bool startup_check_flag;
         std::tuple<RoboCompFullPoseEstimation::FullPoseEuler, double, double> read_base();
         QPolygonF read_laser();
@@ -52,6 +66,27 @@ class SpecificWorker : public GenericWorker
         void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
         Dynamic_Window dwa;
 
+        //robot
+        AbstractGraphicViewer *viewer_robot;
+        const int ROBOT_LENGTH = 400;
+        QGraphicsPolygonItem *robot_polygon;
+        QGraphicsRectItem *laser_in_robot_polygon;
+        void draw_laser(const RoboCompLaser::TLaserData &ldata);
+        Eigen::Vector2f from_world_to_robot(const Eigen::Vector2f &p,  const RoboCompFullPoseEstimation::FullPoseEuler &r_state);
+
+        // target
+        struct Target
+        {
+            bool active = false;
+            QPointF pos;
+            Eigen::Vector2f to_eigen() const {return Eigen::Vector2f(pos.x(), pos.y());}
+            QGraphicsEllipseItem *draw = nullptr;
+        };
+        Target target;
+
+        void move_robot(float adv, float rot);
+
+    float gaussian(float x);
 };
 
 #endif

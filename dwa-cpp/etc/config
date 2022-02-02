@@ -5,6 +5,7 @@ BillCoppeliaProxy = billcoppelia:tcp -h localhost -p 0
 DifferentialRobotProxy = differentialrobot:tcp -h localhost -p 10004
 LaserProxy = laser:tcp -h localhost -p 10003
 OmniRobotProxy = omnirobot:tcp -h localhost -p 0
+FullPoseEstimationProxy = fullposeestimation:tcp -h localhost -p 10696
 
 
 

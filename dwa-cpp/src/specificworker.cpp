@@ -43,23 +43,50 @@ bool SpecificWorker::setParams(RoboCompCommonBehavior::ParameterList params)
 void SpecificWorker::initialize(int period)
 {
 	std::cout << "Initialize worker" << std::endl;
-	this->Period = period;
+    this->Period = period;
 	if(this->startup_check_flag)
 		this->startup_check();
-	else
-		timer.start(Period);
+	else {
+        QRectF dimensions = QRectF(-5100, -2600, 10200, 5200);
+        viewer_robot = new AbstractGraphicViewer(this->graphicsView, dimensions);
+        robot_polygon = viewer_robot->add_robot(ROBOT_LENGTH);
+        laser_in_robot_polygon = new QGraphicsRectItem(-10, 10, 20, 20, robot_polygon);
+        laser_in_robot_polygon->setPos(0, 190);     // move this to abstract
+        connect(viewer_robot, &AbstractGraphicViewer::new_mouse_coordinates, [this](QPointF t)
+                {
+                    qInfo() << __FUNCTION__ << " Received new target at " << t;
+                    target.pos = t;
+                    target.active = true;
+                    //target.draw = viewer_robot->scene.
+                });
+
+        timer.start(Period);
+    }
 }
 
 void SpecificWorker::compute()
 {
-    auto [r_state, advance, rot] = read_base();
+    auto [r_state, advance, rotation] = read_base();
     auto laser_poly = read_laser();
-//    if(target.active)
-//    {
-//        suto dist = target.norm();
-//        if( dist > MAX_DISTANCE_TO_TARGET)
-//            auto[_, __, adv, rot, ___] = dw.compute(tr, laser_poly, advance, rot, nullptr /*&viewer_robot->scene*/);
-//    }
+    if(target.active)
+    {
+        auto tr = from_world_to_robot(target.to_eigen(), r_state);
+        auto dist = tr.norm();
+        if( dist > constants.final_distance_to_target)
+        {
+
+            auto[_, __, adv, rot, ___] = dwa.compute(tr, laser_poly, advance,
+                                                     rotation, &viewer_robot->scene);
+            float dist_break = std::clamp(dist / 1000.0, 0.0, 1.0);
+            float adv_n = constants.max_advance_speed * dist_break * gaussian(rotation);
+            move_robot(adv_n, rot);
+        }
+        else
+        {
+            move_robot(0, 0);
+            target.active = false;
+        }
+    }
 }
 
 std::tuple<RoboCompFullPoseEstimation::FullPoseEuler, double, double> SpecificWorker::read_base()
@@ -71,6 +98,8 @@ std::tuple<RoboCompFullPoseEstimation::FullPoseEuler, double, double> SpecificWo
         r_state = fullposeestimation_proxy->getFullPoseEuler();
         advance = -sin(r_state.rz)*r_state.vx + cos(r_state.rz)*r_state.vy;
         rot = r_state.vrz;  // Rotation W
+        robot_polygon->setRotation(r_state.rz * 180 / M_PI);
+        robot_polygon->setPos(r_state.x, r_state.y);
     }
     catch (const Ice::Exception &e)
     { std::cout << e.what() << std::endl; }
@@ -88,7 +117,32 @@ QPolygonF SpecificWorker::read_laser()
         poly_robot = ramer_douglas_peucker(ldata, MAX_RDP_DEVIATION_mm);
     }
     catch (const Ice::Exception &e) { std::cout << e.what() << std::endl; }
+    draw_laser(ldata);
     return poly_robot;
+}
+void SpecificWorker::move_robot(float adv, float rot)
+{
+    try
+    { differentialrobot_proxy->setSpeedBase(adv, rot); }
+    catch (const Ice::Exception &e)
+    { std::cout << e.what() << std::endl; }
+}
+void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata) // robot coordinates
+{
+    static QGraphicsItem *laser_polygon = nullptr;
+    if (laser_polygon != nullptr)
+        viewer_robot->scene.removeItem(laser_polygon);
+
+    QPolygonF poly;
+    poly << QPointF(0,0);
+    for(auto &&l : ldata)
+        poly << QPointF(l.dist*sin(l.angle), l.dist*cos(l.angle));
+    poly.pop_back();
+
+    QColor color("LightGreen");
+    color.setAlpha(40);
+    laser_polygon = viewer_robot->scene.addPolygon(laser_in_robot_polygon->mapToScene(poly), QPen(QColor("DarkGreen"), 30), QBrush(color));
+    laser_polygon->setZValue(3);
 }
 QPolygonF SpecificWorker::ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon)
 {
@@ -144,7 +198,20 @@ void SpecificWorker::ramer_douglas_peucker_rec(const vector<Point> &pointList, d
         out.push_back(pointList.back());
     }
 }
-
+Eigen::Vector2f SpecificWorker::from_world_to_robot(const Eigen::Vector2f &p,
+                                                    const RoboCompFullPoseEstimation::FullPoseEuler &r_state)
+{
+    Eigen::Matrix2f matrix;
+    matrix << cos(r_state.rz) , -sin(r_state.rz) , sin(r_state.rz) , cos(r_state.rz);
+    return (matrix.transpose() * (p - Eigen::Vector2f(r_state.x, r_state.y)));
+}
+float SpecificWorker::gaussian(float x)
+{
+    const double xset = 0.5;
+    const double yset = 0.4;
+    const double s = -xset*xset/log(yset);
+    return exp(-x*x/s);
+}
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 int SpecificWorker::startup_check()
 {

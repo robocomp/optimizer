@@ -31,8 +31,8 @@ Dynamic_Window::Result Dynamic_Window::compute(const Eigen::Vector2f &target_r, 
     // compute best value
     auto best_choice = compute_optimus(point_list, target_r, previous_turn);
 
-//    if(scene != nullptr)
-//        draw(robot_pos, point_list, best_choice, scene);
+    //if(scene != nullptr)
+    //    draw(robot_pos, point_list, best_choice, scene);
 
     if (best_choice.has_value())
     {
