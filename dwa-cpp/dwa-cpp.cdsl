@@ -2,12 +2,14 @@ import "OmniRobot.idsl";
 import "Laser.idsl";
 import "DifferentialRobot.idsl";
 import "FullPoseEstimation.idsl";
+import "MoveTowards.idsl";
 
 Component dwa_cpp
 {
     Communications
     {
         requires OmniRobot, Laser, DifferentialRobot, FullPoseEstimation;
+        implements MoveTowards;
     };
     language Cpp11;
     gui Qt(QWidget);

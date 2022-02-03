@@ -38,8 +38,9 @@ class SpecificWorker : public GenericWorker
         SpecificWorker(TuplePrx tprx, bool startup_check);
         ~SpecificWorker();
         bool setParams(RoboCompCommonBehavior::ParameterList params);
+        RoboCompMoveTowards::Command MoveTowards_move(float x, float y, float alpha);
 
-    public slots:
+public slots:
         void compute();
         int startup_check();
         void initialize(int period);
@@ -58,11 +59,12 @@ class SpecificWorker : public GenericWorker
         };
         Constants constants;
 
+        QRectF dimensions;
         bool startup_check_flag;
         std::tuple<RoboCompFullPoseEstimation::FullPoseEuler, double, double> read_base();
         QPolygonF read_laser();
         using Point = std::pair<float, float>;  //only for RDP, change to QPointF
-        QPolygonF ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon);
+        QPolygonF ramer_douglas_peucker(RoboCompLaser::TLaserData &ldata, double epsilon);
         void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
         Dynamic_Window dwa;
 
@@ -71,8 +73,11 @@ class SpecificWorker : public GenericWorker
         const int ROBOT_LENGTH = 400;
         QGraphicsPolygonItem *robot_polygon;
         QGraphicsRectItem *laser_in_robot_polygon;
-        void draw_laser(const RoboCompLaser::TLaserData &ldata);
+        void draw_laser(const QPolygonF &ldata);
         Eigen::Vector2f from_world_to_robot(const Eigen::Vector2f &p,  const RoboCompFullPoseEstimation::FullPoseEuler &r_state);
+        double global_advance, global_rotation;
+        Eigen::Vector2f target_in_robot;
+        QPolygonF laser_poly;
 
         // target
         struct Target

@@ -47,7 +47,7 @@ void SpecificWorker::initialize(int period)
 	if(this->startup_check_flag)
 		this->startup_check();
 	else {
-        QRectF dimensions = QRectF(-5100, -2600, 10200, 5200);
+        dimensions = QRectF(-5100, -2600, 10200, 5200);
         viewer_robot = new AbstractGraphicViewer(this->graphicsView, dimensions);
         robot_polygon = viewer_robot->add_robot(ROBOT_LENGTH);
         laser_in_robot_polygon = new QGraphicsRectItem(-10, 10, 20, 20, robot_polygon);
@@ -67,15 +67,16 @@ void SpecificWorker::initialize(int period)
 void SpecificWorker::compute()
 {
     auto [r_state, advance, rotation] = read_base();
-    auto laser_poly = read_laser();
+    laser_poly = read_laser();
+    global_advance = advance;
+    global_rotation = rotation;
+    target_in_robot = from_world_to_robot(target.to_eigen(), r_state);
     if(target.active)
     {
-        auto tr = from_world_to_robot(target.to_eigen(), r_state);
-        auto dist = tr.norm();
+        auto dist = target_in_robot.norm();
         if( dist > constants.final_distance_to_target)
         {
-
-            auto[_, __, adv, rot, ___] = dwa.compute(tr, laser_poly, advance,
+            auto[_, __, adv, rot, ___] = dwa.compute(target_in_robot, laser_poly, advance,
                                                      rotation, &viewer_robot->scene);
             float dist_break = std::clamp(dist / 1000.0, 0.0, 1.0);
             float adv_n = constants.max_advance_speed * dist_break * gaussian(rotation);
@@ -117,7 +118,7 @@ QPolygonF SpecificWorker::read_laser()
         poly_robot = ramer_douglas_peucker(ldata, MAX_RDP_DEVIATION_mm);
     }
     catch (const Ice::Exception &e) { std::cout << e.what() << std::endl; }
-    draw_laser(ldata);
+    draw_laser(poly_robot);
     return poly_robot;
 }
 void SpecificWorker::move_robot(float adv, float rot)
@@ -127,24 +128,18 @@ void SpecificWorker::move_robot(float adv, float rot)
     catch (const Ice::Exception &e)
     { std::cout << e.what() << std::endl; }
 }
-void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata) // robot coordinates
+void SpecificWorker::draw_laser(const QPolygonF &poly) // robot coordinates
 {
     static QGraphicsItem *laser_polygon = nullptr;
     if (laser_polygon != nullptr)
         viewer_robot->scene.removeItem(laser_polygon);
-
-    QPolygonF poly;
-    poly << QPointF(0,0);
-    for(auto &&l : ldata)
-        poly << QPointF(l.dist*sin(l.angle), l.dist*cos(l.angle));
-    poly.pop_back();
 
     QColor color("LightGreen");
     color.setAlpha(40);
     laser_polygon = viewer_robot->scene.addPolygon(laser_in_robot_polygon->mapToScene(poly), QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(3);
 }
-QPolygonF SpecificWorker::ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon)
+QPolygonF SpecificWorker::ramer_douglas_peucker(RoboCompLaser::TLaserData &ldata, double epsilon)
 {
     if(ldata.size()<2)
     {
@@ -152,8 +147,14 @@ QPolygonF SpecificWorker::ramer_douglas_peucker(const RoboCompLaser::TLaserData 
         return QPolygonF();
     }
     std::vector<Point> pointList(ldata.size());
-    for (auto &&[i, l] : ldata | iter::enumerate)
+    float dist_ant = 50;
+    for (auto &&[i, l] : ldata | iter::enumerate) {
+        if (l.dist < 30)
+            l.dist = dist_ant;
+        else
+            dist_ant = l.dist;
         pointList[i] = std::make_pair(l.dist * sin(l.angle), l.dist * cos(l.angle));
+    }
     std::vector<Point> pointListOut;
     ramer_douglas_peucker_rec(pointList, epsilon, pointListOut);
     QPolygonF poly(pointListOut.size());
@@ -218,5 +219,25 @@ int SpecificWorker::startup_check()
 	std::cout << "Startup check" << std::endl;
 	QTimer::singleShot(200, qApp, SLOT(quit()));
 	return 0;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+RoboCompMoveTowards::Command SpecificWorker::MoveTowards_move(float x, float y, float alpha)
+{
+    qInfo() << __FUNCTION__ ;
+    qInfo() << __FUNCTION__ << " Received new target at " << x << y << alpha;
+    // Check if x,y,alpha are within ranges
+    target.pos = QPointF(x, y);
+    if( dimensions.contains(target.pos))
+    {
+        auto[_, __, adv, rot, ___] = dwa.compute(target_in_robot, laser_poly, global_advance,
+                                                 global_rotation, &viewer_robot->scene);
+        float dist_break = std::clamp(target_in_robot.norm() / 1000.0, 0.0, 1.0);
+        float adv_n = constants.max_advance_speed * dist_break * gaussian(global_rotation);
+        RoboCompMoveTowards::Command command{ adv_n, rot};
+        return command;
+    }
+    else
+        qInfo() << __FUNCTION__  << "Target outside boundaries";
 }
 

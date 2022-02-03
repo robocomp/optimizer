@@ -35,6 +35,7 @@
 #include <FullPoseEstimation.h>
 #include <GenericBase.h>
 #include <Laser.h>
+#include <MoveTowards.h>
 #include <OmniRobot.h>
 
 
@@ -63,6 +64,7 @@ public:
 	RoboCompLaser::LaserPrxPtr laser_proxy;
 	RoboCompOmniRobot::OmniRobotPrxPtr omnirobot_proxy;
 
+	virtual RoboCompMoveTowards::Command MoveTowards_move(float x, float y, float alpha) = 0;
 
 protected:
 

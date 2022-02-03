@@ -81,6 +81,7 @@
 #include "specificmonitor.h"
 #include "commonbehaviorI.h"
 
+#include <movetowardsI.h>
 
 #include <GenericBase.h>
 
@@ -239,6 +240,24 @@ int ::dwa_cpp::run(int argc, char* argv[])
 
 		}
 
+
+
+		try
+		{
+			// Server adapter creation and publication
+			if (not GenericMonitor::configGetString(communicator(), prefix, "MoveTowards.Endpoints", tmp, ""))
+			{
+				cout << "[" << PROGRAM_NAME << "]: Can't read configuration for proxy MoveTowards";
+			}
+			Ice::ObjectAdapterPtr adapterMoveTowards = communicator()->createObjectAdapterWithEndpoints("MoveTowards", tmp);
+			auto movetowards = std::make_shared<MoveTowardsI>(worker);
+			adapterMoveTowards->add(movetowards, Ice::stringToIdentity("movetowards"));
+			adapterMoveTowards->activate();
+			cout << "[" << PROGRAM_NAME << "]: MoveTowards adapter created in port " << tmp << endl;
+		}
+		catch (const IceStorm::TopicExists&){
+			cout << "[" << PROGRAM_NAME << "]: ERROR creating or activating adapter for MoveTowards\n";
+		}
 
 
 		// Server adapter creation and publication
