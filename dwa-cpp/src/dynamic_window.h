@@ -21,7 +21,9 @@ class Dynamic_Window
     public:
         Dynamic_Window();
         using Result = std::tuple<float, float, float, float, float>;
-        Result compute(const Eigen::Vector2f &target_r,const QPolygonF &laser_poly, double advance, double rot, QGraphicsScene *scene = nullptr);
+        Result compute(const Eigen::Vector2f &target_r,const QPolygonF &laser_poly,
+                       double advance, double rot, const Eigen::Vector3f &robot,
+                       QGraphicsScene *scene = nullptr);
 
     private:
         std::vector<Result> compute_predictions(float current_adv, float current_rot, const QPolygonF &laser_poly);

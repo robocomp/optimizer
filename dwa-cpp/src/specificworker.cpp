@@ -57,7 +57,7 @@ void SpecificWorker::initialize(int period)
                     qInfo() << __FUNCTION__ << " Received new target at " << t;
                     target.pos = t;
                     target.active = true;
-                    //target.draw = viewer_robot->scene.
+                    target.draw = viewer_robot->scene.addEllipse(t.x()-50, t.y()-50, 100, 100, QPen(QColor("magenta")), QBrush(QColor("magenta")));
                 });
 
         timer.start(Period);
@@ -67,6 +67,7 @@ void SpecificWorker::initialize(int period)
 void SpecificWorker::compute()
 {
     auto [r_state, advance, rotation] = read_base();
+    r_state_global = r_state;
     laser_poly = read_laser();
     global_advance = advance;
     global_rotation = rotation;
@@ -77,7 +78,8 @@ void SpecificWorker::compute()
         if( dist > constants.final_distance_to_target)
         {
             auto[_, __, adv, rot, ___] = dwa.compute(target_in_robot, laser_poly, advance,
-                                                     rotation, &viewer_robot->scene);
+                                                     rotation, Eigen::Vector3f(r_state.x, r_state.y, r_state.rz),
+                                                     &viewer_robot->scene);
             float dist_break = std::clamp(dist / 1000.0, 0.0, 1.0);
             float adv_n = constants.max_advance_speed * dist_break * gaussian(rotation);
             move_robot(adv_n, rot);
@@ -231,7 +233,9 @@ RoboCompMoveTowards::Command SpecificWorker::MoveTowards_move(float x, float y, 
     if( dimensions.contains(target.pos))
     {
         auto[_, __, adv, rot, ___] = dwa.compute(target_in_robot, laser_poly, global_advance,
-                                                 global_rotation, &viewer_robot->scene);
+                                                 global_rotation,
+                                                 Eigen::Vector3f(r_state_global.x, r_state_global.y, r_state_global.rz),
+                                                 &viewer_robot->scene);
         float dist_break = std::clamp(target_in_robot.norm() / 1000.0, 0.0, 1.0);
         float adv_n = constants.max_advance_speed * dist_break * gaussian(global_rotation);
         RoboCompMoveTowards::Command command{ adv_n, rot};

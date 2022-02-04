@@ -76,6 +76,7 @@ public slots:
         void draw_laser(const QPolygonF &ldata);
         Eigen::Vector2f from_world_to_robot(const Eigen::Vector2f &p,  const RoboCompFullPoseEstimation::FullPoseEuler &r_state);
         double global_advance, global_rotation;
+        RoboCompFullPoseEstimation::FullPoseEuler r_state_global;
         Eigen::Vector2f target_in_robot;
         QPolygonF laser_poly;
 

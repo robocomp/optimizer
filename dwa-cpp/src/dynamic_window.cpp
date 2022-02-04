@@ -15,7 +15,9 @@ Dynamic_Window::Dynamic_Window()
                       QPointF(-constants.robot_semi_width, -constants.robot_semi_width);
 }
 
-Dynamic_Window::Result Dynamic_Window::compute(const Eigen::Vector2f &target_r, const QPolygonF &laser_poly, double advance, double rot, QGraphicsScene *scene)
+Dynamic_Window::Result Dynamic_Window::compute(const Eigen::Vector2f &target_r, const QPolygonF &laser_poly,
+                                               double advance, double rot, const Eigen::Vector3f &robot,
+                                               QGraphicsScene *scene)
 {
     static float previous_turn = 0;
     //float robot_angle = robot_pos[2];
@@ -31,8 +33,8 @@ Dynamic_Window::Result Dynamic_Window::compute(const Eigen::Vector2f &target_r, 
     // compute best value
     auto best_choice = compute_optimus(point_list, target_r, previous_turn);
 
-    //if(scene != nullptr)
-    //    draw(robot_pos, point_list, best_choice, scene);
+    if(scene != nullptr)
+        draw(robot, point_list, best_choice, scene);
 
     if (best_choice.has_value())
     {
@@ -122,7 +124,8 @@ std::optional<Dynamic_Window::Result> Dynamic_Window::compute_optimus(const std:
     {
         auto [x, y, adv, giro, ang] = point;
         float dist_to_target = (Eigen::Vector2f(x, y) - tr).norm();
-        float dist_to_previous_turn =  fabs(giro - previous_turn);
+        //float dist_to_previous_turn =  fabs(giro - previous_turn);
+        float dist_to_previous_turn =  fabs(giro);
         values[k] = std::make_tuple(A*dist_to_target + B*dist_to_previous_turn, point);
     }
     auto min = std::ranges::min_element(values, [](auto &a, auto &b){ return std::get<0>(a) < std::get<0>(b);});
