@@ -22,13 +22,14 @@
 	@author authorname
 */
 
-
-
 #ifndef SPECIFICWORKER_H
 #define SPECIFICWORKER_H
 
 #include <genericworker.h>
-#include "dynamic_window.h"
+#include <optional>
+#include <Eigen/Dense>
+#include <qcustomplot/qcustomplot.h>
+//#include "dynamic_window.h"
 #include <abstract_graphic_viewer/abstract_graphic_viewer.h>
 
 class SpecificWorker : public GenericWorker
@@ -46,16 +47,26 @@ public slots:
         void initialize(int period);
 
     private:
+        using Result = std::tuple<float, float, float, float, float>;
         struct Constants
         {
-            const float max_advance_speed = 800;
-            const float tile_size = 100;
+            const float max_advance_speed = 900;
+            const float max_rotation_speed = 1;
             const float max_laser_range = 4000;
-            float current_rot_speed = 0;
-            float current_adv_speed = 0;
-            float robot_length = 450;
-            const float robot_semi_length = robot_length/2.0;
-            const float final_distance_to_target = 150; //mm
+            const float robot_length = 500;
+            const float robot_width = 500;
+            const float laser_x_offset = 0.0;
+            const float laser_y_offset = 200;
+            const float robot_semi_width = robot_width/2;
+            const float robot_semi_length = robot_length/2;
+            const float final_distance_to_target = 950; //mm
+            const float step_along_arc = 200;      // advance step along arc
+            const float time_ahead = 1.4;         // time ahead ahead
+            const float initial_delta_rot = 0.1;
+            const float MAX_RDP_DEVIATION_mm  =  600;       // in laser polygon simplification
+            const float backward_speed = 200;               // mm/sg when going backwards after stuck
+            const float A_dist_factor = 1;                  // weight for distance to target factor in optimun selection
+            const float B_turn_factor = 10;                 // weight for previous turn factor in optimun selection
         };
         Constants constants;
 
@@ -66,19 +77,21 @@ public slots:
         using Point = std::pair<float, float>;  //only for RDP, change to QPointF
         QPolygonF ramer_douglas_peucker(RoboCompLaser::TLaserData &ldata, double epsilon);
         void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
-        Dynamic_Window dwa;
+        //Dynamic_Window dwa;
 
         //robot
         AbstractGraphicViewer *viewer_robot;
-        const int ROBOT_LENGTH = 400;
-        QGraphicsPolygonItem *robot_polygon;
-        QGraphicsRectItem *laser_in_robot_polygon;
+        QGraphicsPolygonItem *robot_draw_polygon;
+        QGraphicsEllipseItem *laser_draw_polygon;
         void draw_laser(const QPolygonF &ldata);
         Eigen::Vector2f from_world_to_robot(const Eigen::Vector2f &p,  const RoboCompFullPoseEstimation::FullPoseEuler &r_state);
+        Eigen::Vector2f from_robot_to_world(const Eigen::Vector2f &p, const Eigen::Vector3f &robot);
         double global_advance, global_rotation;
         RoboCompFullPoseEstimation::FullPoseEuler r_state_global;
         Eigen::Vector2f target_in_robot;
-        QPolygonF laser_poly;
+        QPolygonF laser_poly, left_polygon_robot, right_polygon_robot, polygon_robot;
+        void move_robot(float adv, float rot);
+        float gaussian(float x);
 
         // target
         struct Target
@@ -90,9 +103,26 @@ public slots:
         };
         Target target;
 
-        void move_robot(float adv, float rot);
 
-    float gaussian(float x);
+        // Bill
+        std::optional<SpecificWorker::Target> read_bill();
+
+        //dwa
+        std::optional<Result> control(const Eigen::Vector2f &target_r, const QPolygonF &laser_poly, double advance, double rot,
+                       const Eigen::Vector3f &robot, QGraphicsScene *scene);
+        std::vector<Result> compute_predictions(float current_adv, float current_rot, const QPolygonF &laser_poly);
+        bool point_reachable_by_robot(const Result &point, const QPolygonF &laser_poly);
+        std::optional<Result> compute_optimus(const std::vector<Result> &points, const Eigen::Vector2f &tr);
+        void draw_dwa(const Eigen::Vector3f &robot, const std::vector <Result> &puntos, const std::optional<Result> &best, QGraphicsScene *scene);
+        inline QPointF to_qpointf(const Eigen::Vector2f &p) const {return QPointF(p.x(), p.y());}
+
+        bool do_if_stuck(float adv, float rot, const RoboCompFullPoseEstimation::FullPoseEuler &r_state, bool lhit, bool rhit);
+
+        // QCustomPlot
+        QCustomPlot custom_plot;
+        QCPGraph *rot_graph, *adv_graph, *lhit_graph, *rhit_graph, * stuck_graph;
+
+        void draw_timeseries(float rot, float adv, int lhit, int rhit, int stuck);
 };
 
 #endif

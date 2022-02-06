@@ -3,12 +3,13 @@ import "Laser.idsl";
 import "DifferentialRobot.idsl";
 import "FullPoseEstimation.idsl";
 import "MoveTowards.idsl";
+import "BillCoppelia.idsl";
 
 Component dwa_cpp
 {
     Communications
     {
-        requires OmniRobot, Laser, DifferentialRobot, FullPoseEstimation;
+        requires OmniRobot, Laser, DifferentialRobot, FullPoseEstimation, BillCoppelia;
         implements MoveTowards;
     };
     language Cpp11;

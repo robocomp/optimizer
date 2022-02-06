@@ -2,7 +2,7 @@ CommonBehavior.Endpoints=tcp -p 10200
 MoveTowards.Endpoints=tcp -p 12123
 
 # Proxies for required interfaces
-BillCoppeliaProxy = billcoppelia:tcp -h localhost -p 0
+BillCoppeliaProxy = billcoppelia:tcp -h localhost -p 11046
 DifferentialRobotProxy = differentialrobot:tcp -h localhost -p 10004
 LaserProxy = laser:tcp -h localhost -p 10003
 OmniRobotProxy = omnirobot:tcp -h localhost -p 0
