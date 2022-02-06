@@ -118,8 +118,8 @@ void SpecificWorker::compute()
     laser_poly = read_laser();
 
     // Bill
-//    if(auto t = read_bill(); t.has_value())
-//        target = t.value();
+    if(auto t = read_bill(); t.has_value())
+        target = t.value();
 
     if(target.active)
     {
@@ -130,10 +130,12 @@ void SpecificWorker::compute()
             Result res;
             if( auto res_o =  control(target_in_robot, laser_poly, advance, rotation, Eigen::Vector3f(r_state.x, r_state.y, r_state.rz),
                                                      &viewer_robot->scene); not res_o.has_value())
-            {
+            {   // no control
                 qInfo() << __FUNCTION__ << "NO CONTROL";
-                stuck = do_if_stuck(0, 0, r_state, lhit, rhit);
-                return;
+                if(stuck = do_if_stuck(0, 0, r_state, lhit, rhit); stuck == true)
+                    return;
+                else  // no stuck. Probably an osbtacle appeared suddenly.
+                    move_robot(100, 0);
             }
             else
                 res = res_o.value();
