@@ -97,13 +97,17 @@ void SpecificWorker::compute()
     //if(auto t = read_bill(); t.has_value())
     //    target = t.value();
     // project target on closest laser perimeter point
+    static QGraphicsItem *target_rep = nullptr;
+    if (target_rep != nullptr)
+        viewer_robot->scene.removeItem(target_rep);
+
     if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
                                                         Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
                                                         ldata,
                                                         laser_poly_robot); t.has_value())
-    {
-        target.pos = e2q(from_robot_to_world(t.value()/1000.0, current_tr, current_pose.alpha));
-    }
+        target.pos = e2q(from_robot_to_world(t.value(), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha));
+
+    target_rep = viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkRed"), QBrush(QColor("DarkRed")));
 
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     double dist_to_target = (current_tr - target.to_eigen_meters()).norm();
@@ -143,7 +147,9 @@ void SpecificWorker::compute()
         opti_local.set_value(sum_dist, 0.0);
         for (auto k: iter::range(NUM_STEPS))
             sum_dist += casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
-        opti_local.minimize(0.001 * sum_dist +
+            // sum_dist += casadi::MX::sumsqr(state(casadi::Slice(0,2), k + 1) - state(casadi::Slice(0,2), k));
+            
+        opti_local.minimize(0.0001 * sum_dist +
                              casadi::MX::sumsqr(pos(all, -1) - target_oparam)
                             /*0.1 * casadi::MX::sumsqr(rot)*/
                             /*casadi::MX::sumsqr(adv)*/);
@@ -152,7 +158,7 @@ void SpecificWorker::compute()
         double DW = 0.3;
         //double DL = 0.2;
         std::vector<std::vector<double>> desp = {{DW, 0}, { -DW, 0}};
-        for (auto i: iter::range(3, NUM_STEPS))
+        for (auto i: iter::range(3, NUM_STEPS-2))
         {
             for( auto &d: desp)
             {
@@ -206,6 +212,7 @@ void SpecificWorker::compute()
         target.active = false;
         qInfo() << __FUNCTION__ << "Stopping";
     }
+        // viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkBlue"), QBrush(QColor("DarkBlue")));
 }
 
 // we define here only the fixed part of the problem
@@ -252,7 +259,7 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
         auto k3 = integrate(state(all,k) + (dt/2)*k2, control(all, k));
         auto k4 = integrate(state(all,k) + k3, control(all, k));
         auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
-//        auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
+    //    auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
         opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
     }
 
@@ -275,21 +282,25 @@ std::optional<Eigen::Vector2d> SpecificWorker::find_inside_target(const Eigen::V
     std::vector<std::tuple<Eigen::Vector2d, double, Eigen::ParametrizedLine<double, 2>>> candidates;
     for(auto &&par : iter::sliding_window(ldata, 2))
     {
-        Eigen::Vector2d p1(par[0].dist*sin(par[0].angle), par[0].dist*sin(par[0].angle));
-        Eigen::Vector2d p2(par[1].dist*sin(par[1].angle), par[1].dist*sin(par[1].angle));
+        Eigen::Vector2d p1(par[0].dist*sin(par[0].angle), par[0].dist*cos(par[0].angle));
+        Eigen::Vector2d p2(par[1].dist*sin(par[1].angle), par[1].dist*cos(par[1].angle));
         double dist = (p1-p2).norm();
         auto line = Eigen::ParametrizedLine<double, 2>::Through(p1, p2);
         auto proj = line.projection(target_in_robot);
         if(((proj-p1).norm() > dist) or ((proj-p2).norm() > dist))
-            break; // proy outside p1-p2 segment
-        else
-            candidates.push_back(std::make_tuple(proj, line.squaredDistance(target_in_robot), Eigen::ParametrizedLine<double, 2>::Through(target_in_robot, proj)));
+        {
+            if((proj-p1).norm()>(proj-p2).norm())
+                proj = p2;
+            else
+                proj = p1;
+        }
+        candidates.push_back(std::make_tuple(proj, (proj-target_in_robot).norm()/*line.squaredDistance(target_in_robot)*/, Eigen::ParametrizedLine<double, 2>::Through(target_in_robot, proj)));
     }
     qInfo() << __FUNCTION__ << candidates.empty() << candidates.size();
     if(not candidates.empty())
     {
-        auto min_it = std::ranges::min_element(candidates, [](auto a, auto b){return std::get<double>(a) < std::get<double>(b);});
-        Eigen::Vector2d new_t = std::get<2>(*min_it).pointAt(std::get<double>(*min_it) + 10);
+        auto min_it = std::ranges::min_element(candidates, [](auto a, auto b){return std::get<1>(a) < std::get<1>(b);});
+        Eigen::Vector2d new_t = std::get<2>(*min_it).pointAt(std::get<double>(*min_it) + 200);
         return new_t;
     }
     else
@@ -404,6 +415,7 @@ void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vec
         path_paint.push_back(viewer_robot->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
         path_paint.back()->setZValue(30);
     }
+
 }
 SpecificWorker::Obstacles SpecificWorker::compute_laser_partitions(QPolygonF  &poly_robot)
 {
