@@ -55,9 +55,9 @@ void SpecificWorker::initialize(int period)
     {
         QRectF dimensions(-5100, -2600, 10200, 5200);
         viewer_robot = new AbstractGraphicViewer(this->graphicsView, dimensions);
-        robot_polygon = viewer_robot->add_robot(ROBOT_LENGTH);
-        laser_in_robot_polygon = new QGraphicsRectItem(-10, 10, 20, 20, robot_polygon);
-        laser_in_robot_polygon->setPos(0, 190);     // move this to abstract
+        auto [rp, rl] = viewer_robot->add_robot(ROBOT_LENGTH, ROBOT_LENGTH);
+        laser_in_robot_polygon = rl;
+        robot_polygon = rp;
         this->resize(700,450);
 
         std::vector<double> init_robot{0, 0, 0};
@@ -84,6 +84,9 @@ void SpecificWorker::compute()
     static std::vector<double> previous_values;
 
     qInfo() << "------------------------";
+
+    // Bill
+    read_bill();
 
     //base
     auto [current_pose, current_tr] = read_base();
@@ -135,12 +138,7 @@ void SpecificWorker::compute()
 
         // initial values for state ---
         auto target_oparam = opti_local.parameter(2);
-        auto initial_oparam = opti_local.parameter(3);
-        opti_local.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
         opti_local.set_value(target_oparam, e2v(from_world_to_robot(target.to_eigen_meters(), current_tr, current_pose.alpha)));
-
-        // initial point constraints ------
-        opti_local.subject_to(state(all, 0) == initial_oparam);
 
         // cost function
         auto sum_dist = opti_local.parameter();
@@ -149,7 +147,7 @@ void SpecificWorker::compute()
             sum_dist += casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
             // sum_dist += casadi::MX::sumsqr(state(casadi::Slice(0,2), k + 1) - state(casadi::Slice(0,2), k));
             
-        opti_local.minimize(0.0001 * sum_dist +
+        opti_local.minimize(0.00004 * sum_dist +
                              casadi::MX::sumsqr(pos(all, -1) - target_oparam)
                             /*0.1 * casadi::MX::sumsqr(rot)*/
                             /*casadi::MX::sumsqr(adv)*/);
@@ -158,7 +156,7 @@ void SpecificWorker::compute()
         double DW = 0.3;
         //double DL = 0.2;
         std::vector<std::vector<double>> desp = {{DW, 0}, { -DW, 0}};
-        for (auto i: iter::range(3, NUM_STEPS-2))
+        for (auto i: iter::range(1, NUM_STEPS))
         {
             for( auto &d: desp)
             {
@@ -183,6 +181,7 @@ void SpecificWorker::compute()
             if(retstat.compare("Solve_Succeeded") != 0)
             {
                 std::cout << "NOT succeeded" << std::endl;
+                move_robot(0, 0);  //slow down
                 return;
             }
             previous_values = std::vector<double>(solution.value(state));
@@ -190,21 +189,22 @@ void SpecificWorker::compute()
             // print output -----
             std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
             std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
-            auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
+            auto advance = std::vector<double>(solution.value(adv)).front() * 1000 * 8;
             auto rotation = std::vector<double>(solution.value(rot)).front();
             qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
             qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
             // move the robot
-            auto factor = std::clamp(3.0*dist_to_target, 0.0, 3.0);
-            move_robot(advance*factor, rotation);
+            auto factor = std::clamp(1.0*dist_to_target, 0.0, 1.0);
+            move_robot(advance* factor * gaussian(rotation), rotation);
+            qInfo() << __FUNCTION__ << "Adv: " << advance*factor << "Rot:" << rotation;
 
             // draw
             auto path = std::vector<double>(solution.value(pos));
             draw_path(path, Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
         }
-        catch (...) { std::cout << "No solution found" << std::endl; }
+        catch (...) { std::cout << "No solution found" << std::endl;   }
     }
     else  // at  target
     {
@@ -241,9 +241,6 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     adv = control(0, all);
     rot = control(1, all);
 
-    auto target_oparam = opti.parameter(2);
-    auto initial_oparam = opti.parameter(3);
-
     // Gap closing: dynamic constraints for differential robot: dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
     auto integrate = [](casadi::MX x, casadi::MX u) { return casadi::MX::mtimes(
                                                     casadi::MX::vertcat(std::vector<casadi::MX>{
@@ -264,12 +261,16 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     }
 
     // control constraints -----------
-    opti.subject_to(opti.bounded(-0.5, adv, 0.5));  // control is limited meters
+    opti.subject_to(opti.bounded(0.0, adv, 1));  // control is limited meters
     opti.subject_to(opti.bounded(-1, rot, 1));         // control is limited
 
     // forward velocity constraints -----------
-    opti.subject_to(adv >= 0);
+    //opti.subject_to(adv >= 0);
 
+    // initial point constraints ------
+    auto initial_oparam = opti.parameter(3);
+    opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
+    opti.subject_to(state(all, 0) == initial_oparam);
     return opti;
 }
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -300,7 +301,7 @@ std::optional<Eigen::Vector2d> SpecificWorker::find_inside_target(const Eigen::V
     if(not candidates.empty())
     {
         auto min_it = std::ranges::min_element(candidates, [](auto a, auto b){return std::get<1>(a) < std::get<1>(b);});
-        Eigen::Vector2d new_t = std::get<2>(*min_it).pointAt(std::get<double>(*min_it) + 200);
+        Eigen::Vector2d new_t = std::get<2>(*min_it).pointAt(std::get<double>(*min_it) + 400);
         return new_t;
     }
     else
@@ -371,21 +372,24 @@ std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> SpecificWorker::rea
     catch(const Ice::Exception &e){ qInfo() << "Error connecting to base"; std::cout << e.what() << std::endl;}
     return std::make_tuple(current_pose, current_tr);
 }
-std::optional<SpecificWorker::Target> SpecificWorker::read_bill()
+bool SpecificWorker::read_bill()
 {
     Target my_target;
     try
     {
         auto pose = billcoppelia_proxy->getPose();
-        my_target.pos = QPointF(pose.x, pose.y);
+        target.pos = QPointF(pose.x, pose.y);
+        viewer_robot->scene.removeItem(target.draw);
+        target.active = true;
+        target.draw = viewer_robot->scene.addEllipse(target.pos.x()-50, target.pos.y()-50, 100, 100, QPen(QColor("magenta")), QBrush(QColor("magenta")));
     }
     catch(const Ice::Exception &e)
     {
         qInfo() << "Error connecting to Bill Coppelia";
         std::cout << e.what() << std::endl;
-        return {};
+        return false;
     }
-    return my_target;
+    return true;
 }
 void SpecificWorker::draw_laser(const QPolygonF &poly_world) // robot coordinates
 {
@@ -560,6 +564,13 @@ void SpecificWorker::ramer_douglas_peucker_rec(const vector<Point> &pointList, d
 //    for(auto &&r : removed)
 //        laser_poly.erase(std::remove_if(laser_poly.begin(), laser_poly.end(), [r](auto &p) { return p == r; }), laser_poly.end());
 //}
+float SpecificWorker::gaussian(float x)
+{
+    const double xset = 0.5;
+    const double yset = 0.4;
+    const double s = -xset*xset/log(yset);
+    return exp(-x*x/s);
+}
 /////////////////////////////////////////////////////////////////
 void SpecificWorker::new_target_slot(QPointF t)
 {

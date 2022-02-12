@@ -79,10 +79,11 @@ private:
     //robot
     const int ROBOT_LENGTH = 400;
     QGraphicsPolygonItem *robot_polygon;
-    QGraphicsRectItem *laser_in_robot_polygon;
+    QGraphicsEllipseItem *laser_in_robot_polygon;
     void draw_laser(const QPolygonF &poly_robot);
     std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> read_base();
     std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> read_laser(const Eigen::Vector2d &robot_tr, double robot_angle);
+    float gaussian(float x);
 
     // target
     struct Target
@@ -108,6 +109,6 @@ private:
     void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
 
     // Bill
-    std::optional<Target> read_bill();
+    bool read_bill();
 };
 #endif
