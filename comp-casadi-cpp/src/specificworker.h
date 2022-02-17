@@ -108,6 +108,9 @@ private:
     void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
     void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
 
+    // tests
+    Lines get_cube_lines(const Eigen::Vector2d &robot_tr, double robot_angle);
+
     // Bill
     bool read_bill();
 };
