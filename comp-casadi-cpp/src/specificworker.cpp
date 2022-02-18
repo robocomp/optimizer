@@ -140,6 +140,8 @@ void SpecificWorker::compute()
         // initial values for state ---
         auto target_oparam = opti_local.parameter(2);
         opti_local.set_value(target_oparam, e2v(from_world_to_robot(target.to_eigen_meters(), current_tr, current_pose.alpha)));
+        auto target_angle_param = opti_local.parameter(1);
+        opti_local.set_value(target_angle_param, M_PI/2.);
 
         // cost function
         auto sum_dist = opti_local.parameter();
@@ -158,33 +160,41 @@ void SpecificWorker::compute()
         //                     /*0.1 * casadi::MX::sumsqr(rot)*/
         //                     /*casadi::MX::sumsqr(adv)*/);
 
-        opti_local.minimize(sum_dist_target);
+        opti_local.minimize(sum_dist_target + casadi::MX::sumsqr(phi(-1)-target_angle_param));
 
         // obstacles
         double DW = 0.3;
         //double DL = 0.2;
         std::vector<std::vector<double>> desp = {{0, 0}}; //{{DW, 0}, { -DW, 0}};
 
-
-        auto lines_cube = get_cube_lines(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-
-        casadi::MX convex_global_and = opti_local.parameter();
-        opti_local.set_value(convex_global_and, true);
+        auto obs = from_world_to_robot(Eigen::Vector2d(0,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+        auto obs_param = opti_local.parameter(2);
+        opti_local.set_value(obs_param, e2v(obs/1000.));
 
         for (auto i: iter::range(1, NUM_STEPS))
         {
-            for( auto &d: desp)
-            {
-                casadi::MX convex_or = opti_local.parameter();
-                opti_local.set_value(convex_or, false);
-                for (const auto &[A, B, C]: lines_cube)
-                    convex_or = casadi::MX::logic_or(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) < 0., convex_or);
-
-                convex_global_and = casadi::MX::logic_and(convex_or, convex_global_and);
-            }
+            opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - obs_param) > 0.5);
         }
 
-        opti_local.subject_to(convex_global_and == true);
+        // auto lines_cube = get_cube_lines(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+
+        // casadi::MX convex_global_and = opti_local.parameter();
+        //  opti_local.set_value(convex_global_and, true);
+
+        // for (auto i: iter::range(1, NUM_STEPS))
+        // {
+        //     for( auto &d: desp)
+        //     {
+        //         casadi::MX convex_or = opti_local.parameter();
+        //         opti_local.set_value(convex_or, false);
+        //         for (const auto &[A, B, C]: lines_cube)
+        //             convex_or = casadi::MX::logic_or(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) < 0., convex_or);
+
+        //         convex_global_and = casadi::MX::logic_and(convex_or, convex_global_and);
+        //     }
+        // }
+
+        // opti_local.subject_to(convex_global_and == true);
 
 
 //         casadi::MX convex_global_and = opti_local.parameter();
@@ -306,7 +316,7 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     state = opti.variable(3, N+1);
     // state = opti.variable(2, N+1);
     pos = state(casadi::Slice(0,2), all);
-    //phi = state(2, all);
+    phi = state(2, all);
 
     // ---- inputs variables 2 adv and rot---------
     control = opti.variable(2, N);
@@ -343,7 +353,7 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
 
     // control constraints -----------
     opti.subject_to(opti.bounded(-0.1, adv, 0.5));  // control is limited meters
-    opti.subject_to(opti.bounded(-10, rot, 10));         // control is limited
+    opti.subject_to(opti.bounded(-0.5, rot, 0.5));         // control is limited
 
     // forward velocity constraints -----------
     //opti.subject_to(adv >= 0);
