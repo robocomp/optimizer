@@ -101,11 +101,11 @@ void SpecificWorker::compute()
     if (target_rep != nullptr)
         viewer_robot->scene.removeItem(target_rep);
 
-    if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
-                                                        Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
-                                                        ldata,
-                                                        laser_poly_robot); t.has_value())
-        target.pos = e2q(from_robot_to_world(t.value(), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha));
+    // if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
+    //                                                     Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
+    //                                                     ldata,
+    //                                                     laser_poly_robot); t.has_value())
+    //     target.pos = e2q(from_robot_to_world(t.value(), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha));
 
     target_rep = viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkRed"), QBrush(QColor("DarkRed")));
 
@@ -118,58 +118,109 @@ void SpecificWorker::compute()
 //            initialize_differential(10);
 //       else
         // Warm start
-        if (not previous_values.empty())
-            for (auto i: iter::range(1, NUM_STEPS))
-                opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[2 * i],
-                                                                                      previous_values[2 * i + 1]});
-                                                                                      //previous_values[3 * i + 2]});
-        else   // initialize generating a line segment from 0 to target
-        {
-            double landa = 1.0 / (dist_to_target / NUM_STEPS);
-            for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
-            {
-                opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
-                //opti_local.set_initial(state(2, i), 0.0);
-            }
-        }
+        // if (not previous_values.empty())
+        //     for (auto i: iter::range(1, NUM_STEPS))
+        //         opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[3 * i],
+        //                                                                               previous_values[3 * i + 1],
+        //                                                                               previous_values[3 * i + 2]});
+
+        //         // opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[2 * i],
+        //         //                                                                       previous_values[2 * i + 1]});
+        //         //                                                                       //previous_values[3 * i + 2]});
+        // else   // initialize generating a line segment from 0 to target
+        // {
+        //     double landa = 1.0 / (dist_to_target / NUM_STEPS);
+        //     for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+        //     {
+        //         opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
+        //         //opti_local.set_initial(state(2, i), 0.0);
+        //     }
+        // }
 
         // initial values for state ---
         auto target_oparam = opti_local.parameter(2);
         opti_local.set_value(target_oparam, e2v(from_world_to_robot(target.to_eigen_meters(), current_tr, current_pose.alpha)));
+        auto target_angle_param = opti_local.parameter(1);
+        opti_local.set_value(target_angle_param, M_PI/2.);
 
         // cost function
         auto sum_dist = opti_local.parameter();
+        auto sum_dist_target = opti_local.parameter();
         opti_local.set_value(sum_dist, 0.0);
+        opti_local.set_value(sum_dist_target, 0.0);
         for (auto k: iter::range(NUM_STEPS))
             sum_dist += casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
             // sum_dist += casadi::MX::sumsqr(state(casadi::Slice(0,2), k + 1) - state(casadi::Slice(0,2), k));
-            
-        opti_local.minimize(0.00004 * sum_dist +
-                             casadi::MX::sumsqr(pos(all, -1) - target_oparam)
-                            /*0.1 * casadi::MX::sumsqr(rot)*/
-                            /*casadi::MX::sumsqr(adv)*/);
+
+        for (auto k: iter::range(NUM_STEPS+1))
+            sum_dist_target += casadi::MX::sumsqr(pos(all, k) - target_oparam);
+
+        // opti_local.minimize(1. * sum_dist +
+        //                      casadi::MX::sumsqr(pos(all, -1) - target_oparam)
+        //                     /*0.1 * casadi::MX::sumsqr(rot)*/
+        //                     /*casadi::MX::sumsqr(adv)*/);
+
+        opti_local.minimize(sum_dist_target + casadi::MX::sumsqr(phi(-1)-target_angle_param));
 
         // obstacles
         double DW = 0.3;
         //double DL = 0.2;
-        std::vector<std::vector<double>> desp = {{DW, 0}, { -DW, 0}};
+        std::vector<std::vector<double>> desp = {{0, 0}}; //{{DW, 0}, { -DW, 0}};
+
+        auto obs = from_world_to_robot(Eigen::Vector2d(0,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+        auto obs_param = opti_local.parameter(2);
+        opti_local.set_value(obs_param, e2v(obs/1000.));
+
         for (auto i: iter::range(1, NUM_STEPS))
         {
-            for( auto &d: desp)
-            {
-                casadi::MX convex_or = opti_local.parameter();
-                opti_local.set_value(convex_or, false);
-                for (const auto &[lines, poly]: free_regions)
-                {
-                    casadi::MX convex_and = opti_local.parameter();
-                    opti_local.set_value(convex_and, true);
-                    for (const auto &[A, B, C]: lines)
-                        convex_and = casadi::MX::logic_and(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) > 0, convex_and);
-                    convex_or = casadi::MX::logic_or(convex_or, convex_and);
-                }
-                opti_local.subject_to(convex_or == true);
-            }
+            opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - obs_param) > 0.5);
         }
+
+        // auto lines_cube = get_cube_lines(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+
+        // casadi::MX convex_global_and = opti_local.parameter();
+        //  opti_local.set_value(convex_global_and, true);
+
+        // for (auto i: iter::range(1, NUM_STEPS))
+        // {
+        //     for( auto &d: desp)
+        //     {
+        //         casadi::MX convex_or = opti_local.parameter();
+        //         opti_local.set_value(convex_or, false);
+        //         for (const auto &[A, B, C]: lines_cube)
+        //             convex_or = casadi::MX::logic_or(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) < 0., convex_or);
+
+        //         convex_global_and = casadi::MX::logic_and(convex_or, convex_global_and);
+        //     }
+        // }
+
+        // opti_local.subject_to(convex_global_and == true);
+
+
+//         casadi::MX convex_global_and = opti_local.parameter();
+//         opti_local.set_value(convex_global_and, true);
+
+//         for (auto i: iter::range(1, NUM_STEPS))
+//         {
+//             for( auto &d: desp)
+//             {
+//                 casadi::MX convex_or = opti_local.parameter();
+//                 opti_local.set_value(convex_or, false);
+
+//                 for (const auto &[lines, poly]: free_regions)
+//                 {
+//                     casadi::MX convex_and = opti_local.parameter();
+//                     opti_local.set_value(convex_and, true);
+//                     for (const auto &[A, B, C]: lines)
+//                         convex_and = casadi::MX::logic_and(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) > 0, convex_and);
+//                     convex_or = casadi::MX::logic_or(convex_or, convex_and);
+//                 }
+// //                opti_local.subject_to(convex_or == true);
+//                 convex_global_and = casadi::MX::logic_and(convex_or, convex_global_and);
+//             }
+//         }
+
+//         opti_local.subject_to(convex_global_and == true);
         // solve NLP ------
         try
         {
@@ -188,6 +239,7 @@ void SpecificWorker::compute()
             std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
             auto advance = std::vector<double>(solution.value(adv)).front() * 1000 * 8;
             auto rotation = std::vector<double>(solution.value(rot)).front();
+            qInfo() << std::vector<double>(solution.value(rot));
             qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
             qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
@@ -212,6 +264,36 @@ void SpecificWorker::compute()
         // viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkBlue"), QBrush(QColor("DarkBlue")));
 }
 
+SpecificWorker::Lines SpecificWorker::get_cube_lines(const Eigen::Vector2d &robot_tr, double robot_angle)
+{
+    auto obs_points = std::vector<Eigen::Vector2d>{Eigen::Vector2d(-500, 500), Eigen::Vector2d(500, 500), Eigen::Vector2d(500, -500), Eigen::Vector2d(-500, -500), Eigen::Vector2d(-500, 500)};
+    std::vector<Eigen::Vector2d> obs_points_in_robotSR;
+
+    int ip = 0;
+    for( auto &p: obs_points)
+    {
+        obs_points_in_robotSR.push_back(from_world_to_robot(p, robot_tr, robot_angle));
+        std::cout<<obs_points_in_robotSR[ip].x()<<" "<<obs_points_in_robotSR[ip].y()<<std::endl;
+        ip++;
+    }
+
+    SpecificWorker::Lines obs_lines;
+    int nPoints = obs_points.size();
+    for(auto i: iter::range(0, nPoints-1))
+    {
+        auto p1 = obs_points_in_robotSR[i]/1000.;
+        auto p2 = obs_points_in_robotSR[(i+1)]/1000.;
+        float norm = sqrt(pow((p1.y()-p2.y()), 2) + pow((p1.x()-p2.x()), 2));
+        float A = (p2.y() - p1.y())/norm;
+        float B = (p1.x() - p2.x())/norm;
+        float C = -(A*p1.x() + B*p1.y())/norm;
+         std::cout<<A<<" "<<B<<" "<<C<<std::endl;
+        obs_lines.push_back({A, B, C});
+    }
+    return obs_lines;
+
+}
+
 // we define here only the fixed part of the problem
 casadi::Opti SpecificWorker::initialize_differential(const int N)
 {
@@ -227,13 +309,14 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     //specific_options["acceptable_tol"] = 1e-8;
     //specific_options["acceptable_obj_change_tol"] = 1e-6;
   //  opti.solver("ipopt", generic_options, specific_options);
-    opti.solver("ipopt'", generic_options, specific_options);
+    opti.solver("ipopt", generic_options, specific_options);
 
 
     // ---- state variables ---------
-    state = opti.variable(2, N+1);
+    state = opti.variable(3, N+1);
+    // state = opti.variable(2, N+1);
     pos = state(casadi::Slice(0,2), all);
-    //phi = state(2, all);
+    phi = state(2, all);
 
     // ---- inputs variables 2 adv and rot---------
     control = opti.variable(2, N);
@@ -241,43 +324,43 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     rot = control(1, all);
 
     // Gap closing: dynamic constraints for differential robot: dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
-//    auto integrate = [](casadi::MX x, casadi::MX u) { return casadi::MX::mtimes(
-//                                                    casadi::MX::vertcat(std::vector<casadi::MX>{
-//                                                    casadi::MX::horzcat(std::vector<casadi::MX>{casadi::MX::sin(x(2)), 0.0}),
-//                                                    casadi::MX::horzcat(std::vector<casadi::MX>{casadi::MX::cos(x(2)), 0.0}),
-//                                                    casadi::MX::horzcat(std::vector<casadi::MX>{0.0,      1.0})}
-//                                                ), u);};
-//    double dt = 2;   // timer interval in secs
-//    for(const auto k : iter::range(N))  // loop over control intervals
-//    {
-//        auto k1 = integrate(state(all, k), control(all,k));
-//        auto k2 = integrate(state(all,k) + (dt/2)* k1 , control(all, k));
-//        auto k3 = integrate(state(all,k) + (dt/2)*k2, control(all, k));
-//        auto k4 = integrate(state(all,k) + k3, control(all, k));
-//        auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
-//    //    auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
-//        opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
-//    }
+   auto integrate = [](casadi::MX x, casadi::MX u) { return casadi::MX::mtimes(
+                                                   casadi::MX::vertcat(std::vector<casadi::MX>{
+                                                   casadi::MX::horzcat(std::vector<casadi::MX>{casadi::MX::sin(x(2)), 0.0}),
+                                                   casadi::MX::horzcat(std::vector<casadi::MX>{casadi::MX::cos(x(2)), 0.0}),
+                                                   casadi::MX::horzcat(std::vector<casadi::MX>{0.0,      1.0})}
+                                               ), u);};
+   double dt = 1;   // timer interval in secs
+   for(const auto k : iter::range(N))  // loop over control intervals
+   {
+       auto k1 = integrate(state(all, k), control(all,k));
+       auto k2 = integrate(state(all,k) + (dt/2)* k1 , control(all, k));
+       auto k3 = integrate(state(all,k) + (dt/2)*k2, control(all, k));
+       auto k4 = integrate(state(all,k) + k3, control(all, k));
+       auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
+    //   auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
+       opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
+   }
 
     // Linear model
-    double dt=1;
-    for(const auto k : iter::range(N))  // loop over control intervals
-    {
-        auto x_next = state(all, k) + control(all,k)*dt;
-        opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
-    }
+    // double dt=1;
+    // for(const auto k : iter::range(N))  // loop over control intervals
+    // {
+    //     auto x_next = state(all, k) + control(all,k)*dt;
+    //     opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
+    // }
 
 
     // control constraints -----------
-    opti.subject_to(opti.bounded(-0.1, adv, 1));  // control is limited meters
-    opti.subject_to(opti.bounded(-1, rot, 1));         // control is limited
+    opti.subject_to(opti.bounded(-0.1, adv, 0.5));  // control is limited meters
+    opti.subject_to(opti.bounded(-0.5, rot, 0.5));         // control is limited
 
     // forward velocity constraints -----------
     //opti.subject_to(adv >= 0);
 
     // initial point constraints ------
-    auto initial_oparam = opti.parameter(2);
-    opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0});
+    auto initial_oparam = opti.parameter(3);
+    opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
     opti.subject_to(state(all, 0) == initial_oparam);
     return opti;
 }
