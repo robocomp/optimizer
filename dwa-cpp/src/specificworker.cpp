@@ -19,6 +19,9 @@
 #include "specificworker.h"
 #include <cppitertools/enumerate.hpp>
 #include <cppitertools/range.hpp>
+#include <cppitertools/sliding_window.hpp>
+#include <cppitertools/filter.hpp>
+
 
 /**
 * \brief Default constructor
@@ -108,18 +111,18 @@ void SpecificWorker::initialize(int period)
 
 void SpecificWorker::compute()
 {
-    static float delta_rot = constants.initial_delta_rot;
     bool lhit = false, rhit= false, stuck = false;
     auto [r_state, advance, rotation] = read_base();
     r_state_global = r_state;
     global_advance = advance;
     global_rotation = rotation;
 
-    laser_poly = read_laser();
+    const auto &[l_poly, ldata] = read_laser();
+    laser_poly = l_poly;
 
     // Bill
-    if(auto t = read_bill(); t.has_value())
-        target = t.value();
+//    if(auto t = read_bill(); t.has_value())
+//        target = t.value();
 
     if(target.active)
     {
@@ -127,8 +130,12 @@ void SpecificWorker::compute()
         auto dist = target_in_robot.norm();
         if( dist > constants.final_distance_to_target)
         {
+            // compute the closest point to target inside laser as a provisional target
+            Target s_target = sub_target(target, l_poly, ldata );
+            auto s_target_in_robot = from_world_to_robot(s_target.to_eigen(), r_state);
+
             Result res;
-            if( auto res_o =  control(target_in_robot, laser_poly, advance, rotation, Eigen::Vector3f(r_state.x, r_state.y, r_state.rz),
+            if( auto res_o =  control(s_target_in_robot, laser_poly, advance, rotation, Eigen::Vector3f(r_state.x, r_state.y, r_state.rz),
                                                      &viewer_robot->scene); not res_o.has_value())
             {   // no control
                 qInfo() << __FUNCTION__ << "NO CONTROL";
@@ -141,42 +148,12 @@ void SpecificWorker::compute()
                 res = res_o.value();
             auto [_, __, adv, rot, ___] = res;
 
-            float dist_break = std::clamp(dist / constants.final_distance_to_target - 1.0, -1.0, 1.0);
-            float adv_n = constants.max_advance_speed * dist_break * gaussian(rot);
-            auto linl = laser_draw_polygon->mapFromParent(laser_poly);
-            auto lp = laser_draw_polygon->mapFromParent(left_polygon_robot);
-            if (auto res = std::ranges::find_if_not(lp, [linl](const auto &p)
-                { return linl.containsPoint(p, Qt::WindingFill); }); res != std::end(lp))
-            {
-                qInfo() << __FUNCTION__ << "---- TOCANDO POR LA IZQUIERDA-----------" << *res;
-                rot += delta_rot;
-                delta_rot *= 2;
-                lhit = true;
-            }
-            else
-            {
-                delta_rot = constants.initial_delta_rot;
-                lhit = false;
-            }
-            auto rp = laser_draw_polygon->mapFromParent(right_polygon_robot);
-            if (auto res = std::ranges::find_if_not(rp, [linl](const auto &p)
-                { return linl.containsPoint(p, Qt::WindingFill); }); res != std::end(rp))
-            {
-                qInfo() << __FUNCTION__ << "---- TOCANDO POR LA DERECHA-----------" << *res;
-                rot -= delta_rot;
-                delta_rot *= constants.initial_delta_rot;
-                rhit = true;
-            }
-            else
-            {
-                delta_rot = rot;
-                rhit = false;
-            }
-            rot = std::clamp(rot, -constants.max_rotation_speed, constants.max_rotation_speed);
-            move_robot(adv_n, rot);
-            qInfo() << __FUNCTION__ << adv_n << rot;
+            lateral_bumpers(rot, lhit, rhit);   // check lateral collisions
+            adv = adv * gaussian(rot);          // slow down if rotating
+            move_robot(adv, rot);
+            qInfo() << __FUNCTION__ << adv << rot;
             //stuck = do_if_stuck(adv_n, rot, r_state, lhit, rhit);
-            draw_timeseries(rot*5, adv_n/100, (int)lhit*5, (int)rhit*5, (int)stuck*5);
+            draw_timeseries(rot*5, adv/100, (int)lhit*5, (int)rhit*5, (int)stuck*5);
         }
         else
         {
@@ -187,6 +164,95 @@ void SpecificWorker::compute()
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+// sub_target
+SpecificWorker::Target SpecificWorker::sub_target(const Target &target, const QPolygonF &poly, const RoboCompLaser::TLaserData &ldata)
+{
+    static QGraphicsRectItem *former_draw = nullptr;
+    if(former_draw != nullptr)
+        viewer_robot->scene.removeItem(former_draw);
+
+    // if target inside laser_polygon return
+    auto target_in_robot = from_world_to_robot( target.to_eigen(), r_state_global);
+    if(poly.containsPoint(QPointF(target_in_robot.x(), target_in_robot.y()), Qt::WindingFill))
+        return target;
+
+    // locate openings
+    std::vector<float> derivatives(ldata.size());
+    derivatives[0] = 0;
+    for (const auto &&[k, l]: iter::sliding_window(ldata, 2) | iter::enumerate)
+        derivatives[k + 1] = l[1].dist - l[0].dist;
+
+    std::vector<Eigen::Vector2f> peaks;
+    for (const auto &&[k, der]: iter::enumerate(derivatives))
+    {
+        RoboCompLaser::TData l;
+        if (der > 500)
+        {
+            l = ldata.at(k - 1);
+            peaks.push_back(Eigen::Vector2f(l.dist * sin(l.angle), l.dist * cos(l.angle)));
+        }
+        else if (der < -500)
+        {
+            l = ldata.at(k);
+            peaks.push_back(Eigen::Vector2f(l.dist * sin(l.angle), l.dist * cos(l.angle)));
+        }
+    }
+    // select closest opening to robot
+    if(peaks.empty())
+        return target;
+
+    auto min = std::ranges::min_element(peaks, [target_in_robot](auto a, auto b){ return (target_in_robot-a).norm() < (target_in_robot-b).norm();});
+    auto candidate = *min;
+
+    // if too close to subtarget ignore
+    if( candidate.norm() < 200)
+        return target;
+
+    // if target closer that subtatget ignore
+    if(target_in_robot.norm() < candidate.norm())
+        return target;
+    
+    Target t;
+    t.active = true;
+    auto pos = from_robot_to_world(*min, Eigen::Vector3f(r_state_global.x, r_state_global.y, r_state_global.rz));
+    t.pos = QPointF(pos.x(), pos.y());
+    former_draw = viewer_robot->scene.addRect(t.pos.x()-100, t.pos.y()-100, 200, 200, QPen(QColor("blue")), QBrush(QColor("blue")));
+    return t;
+}
+// lateral bumpers
+void SpecificWorker::lateral_bumpers(float &rot, bool &lhit, bool &rhit)
+{
+    static float delta_rot = constants.initial_delta_rot;
+    auto linl = laser_draw_polygon->mapFromParent(laser_poly);
+    auto lp = laser_draw_polygon->mapFromParent(left_polygon_robot);
+    if (auto res = std::ranges::find_if_not(lp, [linl](const auto &p)
+        { return linl.containsPoint(p, Qt::WindingFill); }); res != std::end(lp))
+    {
+        qInfo() << __FUNCTION__ << "---- TOCANDO POR LA IZQUIERDA-----------" << *res;
+        rot += delta_rot;
+        delta_rot *= 2;
+        lhit = true;
+    }
+    else
+    {
+        delta_rot = constants.initial_delta_rot;
+        lhit = false;
+    }
+    auto rp = laser_draw_polygon->mapFromParent(right_polygon_robot);
+    if (auto res = std::ranges::find_if_not(rp, [linl](const auto &p)
+        { return linl.containsPoint(p, Qt::WindingFill); }); res != std::end(rp))
+    {
+        qInfo() << __FUNCTION__ << "---- TOCANDO POR LA DERECHA-----------" << *res;
+        rot -= delta_rot;
+        delta_rot *= 2;
+        rhit = true;
+    }
+    else
+    {
+        delta_rot = constants.initial_delta_rot;
+        rhit = false;
+    }
+}
 // checks if the robot is moving in a time interval
 bool SpecificWorker::do_if_stuck(float adv, float rot, const RoboCompFullPoseEstimation::FullPoseEuler &r_state, bool lhit, bool rhit)
 {
@@ -203,6 +269,7 @@ bool SpecificWorker::do_if_stuck(float adv, float rot, const RoboCompFullPoseEst
         if(lhit) move_robot(-constants.backward_speed, -dist(mt));
         else if(rhit) move_robot(-constants.backward_speed, dist(mt));
         else move_robot(-constants.backward_speed, 0);
+        usleep(300000);
         qInfo() << __FUNCTION__ << "------ STUCK ----------";
         return true;
     }
@@ -212,8 +279,6 @@ std::optional<SpecificWorker::Result> SpecificWorker::control(const Eigen::Vecto
                                                double advance, double rot, const Eigen::Vector3f &robot,
                                                QGraphicsScene *scene)
 {
-    static float previous_turn = 0;
-
     // compute future positions of the robot
     auto point_list = compute_predictions(advance, rot, laser_poly);
 
@@ -226,7 +291,6 @@ std::optional<SpecificWorker::Result> SpecificWorker::control(const Eigen::Vecto
     if (best_choice.has_value())
     {
         auto[x, y, v, w, alpha]= best_choice.value();  // x,y coordinates of best point, v,w velocities to reach that point, alpha robot's angle at that point
-        previous_turn = w;
         return best_choice.value();
     }
     else
@@ -235,26 +299,31 @@ std::optional<SpecificWorker::Result> SpecificWorker::control(const Eigen::Vecto
 std::vector<SpecificWorker::Result> SpecificWorker::compute_predictions(float current_adv, float current_rot, const QPolygonF &laser_poly)
 {
     std::vector<Result> list_points;
-    for (float v = 0; v <= constants.max_advance_speed; v += 50) //advance
-        for (float w = -1; w <= 1; w += 0.1) //rotation
+    for (float v = -constants.max_advance_speed; v <= constants.max_advance_speed; v += 50) //advance
+    {
+        float new_adv = current_adv + v;
+        if (fabs(new_adv) > constants.max_advance_speed)
+            continue;
+        for (float w = -constants.max_rotation_speed; w <= constants.max_rotation_speed; w += 0.1) //rotation
         {
-            float new_adv = current_adv + v;
             float new_rot = -current_rot + w;
+            if (fabs(new_rot) > constants.max_rotation_speed)
+                continue;
             if (fabs(w) > 0.001)  // avoid division by zero to compute the radius
             {
                 float r = new_adv / new_rot; // radio de giro ubicado en el eje x del robot
                 float arc_length = new_rot * constants.time_ahead * r;
                 for (float t = constants.step_along_arc; t < arc_length; t += constants.step_along_arc)
                 {
-                    float x = r - r * cos(t / r); float y= r * sin(t / r);  // circle parametric coordinates
+                    float x = r - r * cos(t / r);
+                    float y = r * sin(t / r);  // circle parametric coordinates
                     auto point = std::make_tuple(x, y, new_adv, new_rot, t / r);
-                    if(sqrt(x*x + y*y)> constants.robot_semi_width and point_reachable_by_robot(point, laser_poly)) // skip points in the robot
+                    if (sqrt(x * x + y * y) > constants.robot_semi_width and point_reachable_by_robot(point, laser_poly)) // skip points in the robot
                         list_points.emplace_back(std::move(point));
                 }
-            }
-            else // para evitar la división por cero en el cálculo de r
+            } else // para evitar la división por cero en el cálculo de r
             {
-                for(float t = constants.step_along_arc; t < new_adv * constants.time_ahead; t+=constants.step_along_arc)
+                for (float t = constants.step_along_arc; t < new_adv * constants.time_ahead; t += constants.step_along_arc)
                 {
                     auto point = std::make_tuple(0.f, t, new_adv, new_rot, new_rot * constants.time_ahead);
                     if (t > constants.robot_semi_width and point_reachable_by_robot(point, laser_poly))
@@ -262,6 +331,7 @@ std::vector<SpecificWorker::Result> SpecificWorker::compute_predictions(float cu
                 }
             }
         }
+    }
     return list_points;
 }
 bool SpecificWorker::point_reachable_by_robot(const Result &point, const QPolygonF &laser_poly)
@@ -291,18 +361,27 @@ bool SpecificWorker::point_reachable_by_robot(const Result &point, const QPolygo
 std::optional<SpecificWorker::Result> SpecificWorker::compute_optimus(const std::vector<Result> &points,
                                                                       const Eigen::Vector2f &tr)
 {
+    static float prev_advance = 0, prev_rot = 0;
     std::vector<std::tuple<float, Result>> values(points.size());
     for(auto &&[k, point] : iter::enumerate(points))
     {
         auto [x, y, adv, giro, ang] = point;
         float dist_to_target = (Eigen::Vector2f(x, y) - tr).norm();
-        //float dist_to_previous_turn =  fabs(giro - previous_turn);
-        float dist_to_previous_turn =  fabs(giro);
-        values[k] = std::make_tuple(constants.A_dist_factor*dist_to_target + constants.B_turn_factor*dist_to_previous_turn, point);
+        float turn_variation  = fabs(giro-prev_rot);
+        float advance_variation = fabs(adv-prev_advance);
+        values[k] = std::make_tuple(constants.A_dist_factor*dist_to_target +
+                                    constants.B_turn_factor*turn_variation +
+                                    constants.C_advance_factor*advance_variation, point);
     }
     auto min = std::ranges::min_element(values, [](auto &a, auto &b){ return std::get<0>(a) < std::get<0>(b);});
     if(min != values.end())
-        return std::get<Result>(*min);
+    {
+        Result r = std::get<Result>(*min);
+        auto &[x, y, adv, giro, ang] = r;
+        prev_advance = adv;
+        prev_rot = giro;
+        return r;
+    }
     else
         return {};
 }
@@ -370,7 +449,7 @@ std::tuple<RoboCompFullPoseEstimation::FullPoseEuler, double, double> SpecificWo
     { std::cout << e.what() << std::endl; }
     return std::make_tuple(r_state, advance, rot);
 }
-QPolygonF SpecificWorker::read_laser()
+std::tuple<QPolygonF, RoboCompLaser::TLaserData> SpecificWorker::read_laser()
 {
     QPolygonF poly_robot;
     RoboCompLaser::TLaserData ldata;
@@ -380,10 +459,9 @@ QPolygonF SpecificWorker::read_laser()
         float dist_ant = 50;
         for (auto &&l : ldata)
         {
-            if (l.dist < 30)
+            if (l.dist < 50)
                 l.dist = dist_ant;
-            else
-                dist_ant = l.dist;
+            dist_ant = l.dist;
             poly_robot << QPointF(l.dist * sin(l.angle), l.dist * cos(l.angle));
         }
         // Simplify laser contour with Ramer-Douglas-Peucker
@@ -400,7 +478,7 @@ QPolygonF SpecificWorker::read_laser()
     }
     catch (const Ice::Exception &e) { std::cout << e.what() << std::endl; }
     draw_laser(poly_robot);
-    return poly_robot;
+    return std::make_tuple(poly_robot, ldata);
 }
 void SpecificWorker::move_robot(float adv, float rot)
 {

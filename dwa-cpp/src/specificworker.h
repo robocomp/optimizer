@@ -54,12 +54,12 @@ public slots:
             const float max_rotation_speed = 1;
             const float max_laser_range = 4000;
             const float robot_length = 500;
-            const float robot_width = 500;
+            const float robot_width = 700;
             const float laser_x_offset = 0.0;
             const float laser_y_offset = 200;
             const float robot_semi_width = robot_width/2;
             const float robot_semi_length = robot_length/2;
-            const float final_distance_to_target = 950; //mm
+            const float final_distance_to_target = 150; //mm
             const float step_along_arc = 200;      // advance step along arc
             const float time_ahead = 1.4;         // time ahead ahead
             const float initial_delta_rot = 0.1;
@@ -67,13 +67,14 @@ public slots:
             const float backward_speed = 200;               // mm/sg when going backwards after stuck
             const float A_dist_factor = 1;                  // weight for distance to target factor in optimun selection
             const float B_turn_factor = 10;                 // weight for previous turn factor in optimun selection
+            const float C_advance_factor = 3;
         };
         Constants constants;
 
         QRectF dimensions;
         bool startup_check_flag;
         std::tuple<RoboCompFullPoseEstimation::FullPoseEuler, double, double> read_base();
-        QPolygonF read_laser();
+        std::tuple<QPolygonF, RoboCompLaser::TLaserData>  read_laser();
         using Point = std::pair<float, float>;  //only for RDP, change to QPointF
         QPolygonF ramer_douglas_peucker(RoboCompLaser::TLaserData &ldata, double epsilon);
         void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
@@ -123,6 +124,9 @@ public slots:
         QCPGraph *rot_graph, *adv_graph, *lhit_graph, *rhit_graph, * stuck_graph;
 
         void draw_timeseries(float rot, float adv, int lhit, int rhit, int stuck);
+        void lateral_bumpers(float &rot, bool &lhit, bool &rhit);
+        Target sub_target(const Target &target, const QPolygonF &poly, const RoboCompLaser::TLaserData &ldata);
+
 };
 
 #endif
