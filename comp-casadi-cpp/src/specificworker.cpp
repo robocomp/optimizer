@@ -141,14 +141,14 @@ void SpecificWorker::compute()
         auto target_oparam = opti_local.parameter(2);
         opti_local.set_value(target_oparam, e2v(from_world_to_robot(target.to_eigen_meters(), current_tr, current_pose.alpha)));
         auto target_angle_param = opti_local.parameter(1);
-        opti_local.set_value(target_angle_param, M_PI/2.);
+        opti_local.set_value(target_angle_param, -M_PI/2.);
 
         // cost function
         auto sum_dist = opti_local.parameter();
         auto sum_dist_target = opti_local.parameter();
         opti_local.set_value(sum_dist, 0.0);
         opti_local.set_value(sum_dist_target, 0.0);
-        for (auto k: iter::range(NUM_STEPS))
+        for (auto k: iter::range(NUM_STEPS-1))
             sum_dist += casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
             // sum_dist += casadi::MX::sumsqr(state(casadi::Slice(0,2), k + 1) - state(casadi::Slice(0,2), k));
 
@@ -160,7 +160,7 @@ void SpecificWorker::compute()
         //                     /*0.1 * casadi::MX::sumsqr(rot)*/
         //                     /*casadi::MX::sumsqr(adv)*/);
 
-        opti_local.minimize(sum_dist_target + casadi::MX::sumsqr(phi(-1)-target_angle_param));
+        opti_local.minimize(sum_dist_target + casadi::MX::sumsqr(phi(-1)-target_angle_param)*10);
 
         // obstacles
         double DW = 0.3;
@@ -168,13 +168,33 @@ void SpecificWorker::compute()
         std::vector<std::vector<double>> desp = {{0, 0}}; //{{DW, 0}, { -DW, 0}};
 
         auto obs = from_world_to_robot(Eigen::Vector2d(0,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-        auto obs_param = opti_local.parameter(2);
-        opti_local.set_value(obs_param, e2v(obs/1000.));
+        auto obs_2 = from_world_to_robot(Eigen::Vector2d(1000,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+        auto obs_param_1 = opti_local.parameter(2);
+        auto obs_param_2 = opti_local.parameter(2);
+        opti_local.set_value(obs_param_1, e2v(obs/1000.));
+        opti_local.set_value(obs_param_2, e2v(obs_2/1000.));
 
+        casadi::MX convex_and = opti_local.variable(1, NUM_STEPS-1);
+        //opti_local.set_value(convex_and, true);
+
+        casadi::MX p = casadi::MX::sym("p", 2);
+        casadi::MX center = casadi::MX::sym("center", 2);
+        auto f = casadi::Function("f", std::vector<casadi::MX>{p, center},
+                                  std::vector<casadi::MX>{casadi::MX::sumsqr(p-center)-0.5});
+
+        casadi::MX dists(1, NUM_STEPS-1);
         for (auto i: iter::range(1, NUM_STEPS))
         {
-            opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - obs_param) > 0.5);
+            //dists(0, i-1) = f({pos(all, i), obs_param_1}).at(0);
+            dists(0, i-1) = casadi::MX::sumsqr(pos(all, i) - obs_param_1)-0.5;
         }
+        opti_local.subject_to(casadi::MX::mmin(dists) > 0);
+
+        //opti_local.subject_to(convex_and == true);
+
+        //opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - obs_param_1) > 0.5);
+        //opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - obs_param_2) > 0.5);
+        //opti_local.set_value(convex_and(0, i), casadi::MX::sumsqr(pos(all, i) - obs_param_1) > 0.5);
 
         // auto lines_cube = get_cube_lines(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
 
@@ -461,7 +481,7 @@ std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> SpecificWorker::rea
         robot_polygon->setPos(current_pose.x, current_pose.z);
     }
     catch(const Ice::Exception &e){ qInfo() << "Error connecting to base"; std::cout << e.what() << std::endl;}
-    return std::make_tuple(current_pose, current_tr);
+    return std::make_tuple(current_pose, current_tr);  
 }
 bool SpecificWorker::read_bill()
 {
