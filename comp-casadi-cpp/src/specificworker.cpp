@@ -21,6 +21,7 @@
 #include <Eigen/Dense>
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
+#include <cppitertools/slice.hpp>
 #include <cppitertools/chunked.hpp>
 #include <cppitertools/sliding_window.hpp>
 
@@ -61,7 +62,7 @@ void SpecificWorker::initialize(int period)
         this->resize(700,450);
 
         std::vector<double> init_robot{0, 0, 0};
-        NUM_STEPS = 12;
+        NUM_STEPS = 10;
 
         opti = initialize_differential(NUM_STEPS);
 
@@ -86,26 +87,27 @@ void SpecificWorker::compute()
     qInfo() << "------------------------";
 
     // Bill
-    //read_bill();
+    read_bill();
 
     //base
     auto [current_pose, current_tr] = read_base();
 
     // laser
     auto &&[laser_poly_robot, laser_poly_world, ldata] = read_laser(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-    auto free_regions = compute_laser_partitions(laser_poly_robot);
-    draw_partitions(free_regions, QColor("Magenta"));
+    //auto free_regions = compute_laser_partitions(laser_poly_robot);
+    //draw_partitions(free_regions, QColor("Magenta"));
 
-    // project target on closest laser perimeter point
+    // remove old target draw
     static QGraphicsItem *target_rep = nullptr;
     if (target_rep != nullptr)
         viewer_robot->scene.removeItem(target_rep);
 
-    // if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
-    //                                                     Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
-    //                                                     ldata,
-    //                                                     laser_poly_robot); t.has_value())
-    //     target.pos = e2q(from_robot_to_world(t.value(), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha));
+    // project target on closest laser perimeter point
+     if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
+                                                         Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
+                                                         ldata,
+                                                         laser_poly_robot); t.has_value())
+         target.pos = e2q(from_robot_to_world(t.value(), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha));
 
     target_rep = viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkRed"), QBrush(QColor("DarkRed")));
 
@@ -118,24 +120,21 @@ void SpecificWorker::compute()
 //            initialize_differential(10);
 //       else
         // Warm start
-        // if (not previous_values.empty())
-        //     for (auto i: iter::range(1, NUM_STEPS))
-        //         opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[3 * i],
-        //                                                                               previous_values[3 * i + 1],
-        //                                                                               previous_values[3 * i + 2]});
+         if (not previous_values.empty())
+             for (auto i: iter::range(1, NUM_STEPS))
+                 opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[3 * i],
+                                                                                       previous_values[3 * i + 1],
+                                                                                       previous_values[3 * i + 2]});
 
-        //         // opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values[2 * i],
-        //         //                                                                       previous_values[2 * i + 1]});
-        //         //                                                                       //previous_values[3 * i + 2]});
-        // else   // initialize generating a line segment from 0 to target
-        // {
-        //     double landa = 1.0 / (dist_to_target / NUM_STEPS);
-        //     for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
-        //     {
-        //         opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
-        //         //opti_local.set_initial(state(2, i), 0.0);
-        //     }
-        // }
+         else   // initialize generating a line segment from 0 to target
+         {
+             double landa = 1.0 / (dist_to_target / NUM_STEPS);
+             for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+             {
+                 opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
+                 opti_local.set_initial(state(2, i), 0.0);
+             }
+         }
 
         // initial values for state ---
         auto target_oparam = opti_local.parameter(2);
@@ -160,35 +159,35 @@ void SpecificWorker::compute()
         //                     /*0.1 * casadi::MX::sumsqr(rot)*/
         //                     /*casadi::MX::sumsqr(adv)*/);
 
-        opti_local.minimize(sum_dist_target + casadi::MX::sumsqr(phi(-1)-target_angle_param)*10);
+        opti_local.minimize(sum_dist_target + /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/  casadi::MX::sumsqr(rot));
 
         // obstacles
         double DW = 0.3;
         //double DL = 0.2;
-        std::vector<std::vector<double>> desp = {{0, 0}}; //{{DW, 0}, { -DW, 0}};
+        //std::vector<std::vector<double>> desp = {{0, 0}}; //{{DW, 0}, { -DW, 0}};
 
-        auto obs = from_world_to_robot(Eigen::Vector2d(0,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-        auto obs_2 = from_world_to_robot(Eigen::Vector2d(1000,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-        auto obs_param_1 = opti_local.parameter(2);
-        auto obs_param_2 = opti_local.parameter(2);
-        opti_local.set_value(obs_param_1, e2v(obs/1000.));
-        opti_local.set_value(obs_param_2, e2v(obs_2/1000.));
+//        auto obs = from_world_to_robot(Eigen::Vector2d(0,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+//        auto obs_2 = from_world_to_robot(Eigen::Vector2d(1000,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+//        auto obs_param_1 = opti_local.parameter(2);
+//        auto obs_param_2 = opti_local.parameter(2);
+//        opti_local.set_value(obs_param_1, e2v(obs/1000.));
+//        opti_local.set_value(obs_param_2, e2v(obs_2/1000.));
 
-        casadi::MX convex_and = opti_local.variable(1, NUM_STEPS-1);
+//        casadi::MX convex_and = opti_local.variable(1, NUM_STEPS-1);
         //opti_local.set_value(convex_and, true);
 
-        casadi::MX p = casadi::MX::sym("p", 2);
-        casadi::MX center = casadi::MX::sym("center", 2);
-        auto f = casadi::Function("f", std::vector<casadi::MX>{p, center},
-                                  std::vector<casadi::MX>{casadi::MX::sumsqr(p-center)-0.5});
+        //casadi::MX p = casadi::MX::sym("p", 2);
+        //casadi::MX center = casadi::MX::sym("center", 2);
+//        auto f = casadi::Function("f", std::vector<casadi::MX>{p, center},
+//                                  std::vector<casadi::MX>{casadi::MX::sumsqr(p-center)-0.5});
+        //casadi::MX dists(1, NUM_STEPS-1);
 
-        casadi::MX dists(1, NUM_STEPS-1);
-        for (auto i: iter::range(1, NUM_STEPS))
-        {
-            //dists(0, i-1) = f({pos(all, i), obs_param_1}).at(0);
-            dists(0, i-1) = casadi::MX::sumsqr(pos(all, i) - obs_param_1)-0.5;
-        }
-        opti_local.subject_to(casadi::MX::mmin(dists) > 0);
+//        std::vector<casadi::MX> obs_params;
+//        obs_params.assign(ldata.size(), opti_local.parameter(2));
+        for(const auto &l : iter::slice(ldata, 0, (int)ldata.size(), 15))
+                for (auto i: iter::range(1, NUM_STEPS))
+                    opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - std::vector<double>{l.dist*sin(l.angle)/1000.0,
+                                                                                               l.dist*cos(l.angle)/1000.0}) > 0.1);
 
         //opti_local.subject_to(convex_and == true);
 
@@ -257,7 +256,7 @@ void SpecificWorker::compute()
             // print output -----
             std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
             std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
-            auto advance = std::vector<double>(solution.value(adv)).front() * 1000 * 8;
+            auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
             auto rotation = std::vector<double>(solution.value(rot)).front();
             qInfo() << std::vector<double>(solution.value(rot));
             qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
@@ -267,6 +266,8 @@ void SpecificWorker::compute()
             // move the robot
             auto factor = std::clamp(1.0*dist_to_target, 0.0, 1.0);
             //move_robot(advance* factor * gaussian(rotation), rotation);
+            move_robot(advance /** gaussian(rotation)*/, rotation);
+
             qInfo() << __FUNCTION__ << "Adv: " << advance*factor << "Rot:" << rotation;
 
             // draw
@@ -358,7 +359,7 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
        auto k3 = integrate(state(all,k) + (dt/2)*k2, control(all, k));
        auto k4 = integrate(state(all,k) + k3, control(all, k));
        auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
-    //   auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
+       //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
        opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
    }
 
@@ -372,7 +373,7 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
 
 
     // control constraints -----------
-    opti.subject_to(opti.bounded(-0.1, adv, 0.5));  // control is limited meters
+    opti.subject_to(opti.bounded(-0.1, adv, 0.8));  // control is limited meters
     opti.subject_to(opti.bounded(-0.5, rot, 0.5));         // control is limited
 
     // forward velocity constraints -----------

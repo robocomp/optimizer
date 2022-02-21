@@ -39,36 +39,6 @@
 #include "polypartition.h"
 //#include <template_utilities/template_utilities.h>
 
-class InsideFreeZones : public casadi::Callback
-{
-    casadi::MX pos;
-    public:
-        InsideFreeZones(const std::string& name, casadi::MX pos,
-                   const casadi::Dict& opts=casadi::Dict()) : pos(pos)
-        {
-            construct(name, opts);
-        }
-        ~InsideFreeZones() override {}
-
-        // Number of inputs and outputs
-        casadi_int get_n_in() override { return 2;}
-        casadi_int get_n_out() override { return 1;}
-
-        void init() override
-        {
-            std::cout << "initializing object" << std::endl;
-        }
-
-        // Evaluate numerically
-        std::vector<casadi::DM> eval(const std::vector<casadi::DM>& arg) const override
-        {
-            //casadi::DM p = arg.at(0);
-            //casadi::DX f;
-            //if (casadi::MX::sumsqr(pos - p) > 0.5)
-            //return {f};
-        }
-};
-
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
