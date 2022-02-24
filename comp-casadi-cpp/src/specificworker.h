@@ -97,6 +97,7 @@ private:
         QGraphicsEllipseItem *draw = nullptr;
     };
     Target target;
+    std::vector<double> previous_values;
 
     // convex parrtitions
     using Point = std::pair<float, float>;  //only for RDP, change to QPointF

@@ -71,6 +71,7 @@ void SpecificWorker::initialize(int period)
                                 qInfo() << __FUNCTION__ << " Received new target at " << p;
                                 target.pos = p;
                                 target.active = true;
+                                previous_values.clear();
                             });
 
         //timer.setSingleShot(true);
@@ -82,12 +83,11 @@ void SpecificWorker::compute()
 {
     auto opti_local = opti.copy();
     casadi::Slice all;
-    static std::vector<double> previous_values;
 
     qInfo() << "------------------------";
 
     // Bill
-    read_bill();
+    //read_bill();
 
     //base
     auto [current_pose, current_tr] = read_base();
@@ -126,15 +126,15 @@ void SpecificWorker::compute()
                                                                                        previous_values[3 * i + 1],
                                                                                        previous_values[3 * i + 2]});
 
-         else   // initialize generating a line segment from 0 to target
-         {
-             double landa = 1.0 / (dist_to_target / NUM_STEPS);
-             for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
-             {
-                 opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
-                 opti_local.set_initial(state(2, i), 0.0);
-             }
-         }
+//         else   // initialize generating a line segment from 0 to target
+//         {
+//             double landa = 1.0 / (dist_to_target / NUM_STEPS);
+//             for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+//             {
+//                 opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
+//                 opti_local.set_initial(state(2, i), 0.0);
+//             }
+//         }
 
         // initial values for state ---
         auto target_oparam = opti_local.parameter(2);
@@ -159,6 +159,7 @@ void SpecificWorker::compute()
         //                     /*0.1 * casadi::MX::sumsqr(rot)*/
         //                     /*casadi::MX::sumsqr(adv)*/);
 
+
         opti_local.minimize(sum_dist_target + /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/  casadi::MX::sumsqr(rot));
 
         // obstacles
@@ -166,80 +167,30 @@ void SpecificWorker::compute()
         //double DL = 0.2;
         //std::vector<std::vector<double>> desp = {{0, 0}}; //{{DW, 0}, { -DW, 0}};
 
-//        auto obs = from_world_to_robot(Eigen::Vector2d(0,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-//        auto obs_2 = from_world_to_robot(Eigen::Vector2d(1000,0), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-//        auto obs_param_1 = opti_local.parameter(2);
-//        auto obs_param_2 = opti_local.parameter(2);
-//        opti_local.set_value(obs_param_1, e2v(obs/1000.));
-//        opti_local.set_value(obs_param_2, e2v(obs_2/1000.));
+        static std::vector<QGraphicsItem *> balls;
+        if(not balls.empty())
+            for(auto &b : balls) viewer_robot->scene.removeItem(b);
+        balls.clear();
 
-//        casadi::MX convex_and = opti_local.variable(1, NUM_STEPS-1);
-        //opti_local.set_value(convex_and, true);
+        QPen tip_color_pen(QColor("DarkGreen"));
+        QBrush tip_color_brush(QColor("DarkGreen"));
+        for(const auto &l : iter::slice(ldata, 0, (int)ldata.size(), 15))  //Replace by a non-homogenous sampling of the laser border
+        {
+            auto x = l.dist * sin(l.angle);
+            auto y = l.dist * cos(l.angle);
+            QPointF pw(robot_polygon->mapToScene(QPointF(x-100,y-100)));
+            balls.push_back(viewer_robot->scene.addEllipse(QRectF(pw.x(), pw.y(), 200, 200), tip_color_pen, tip_color_brush));
+            std::vector<double> point{x/1000.0, y/1000.0};
+            for (auto i: iter::range(1, NUM_STEPS))
+                opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - point) > 0.1);
+        }
 
-        //casadi::MX p = casadi::MX::sym("p", 2);
-        //casadi::MX center = casadi::MX::sym("center", 2);
-//        auto f = casadi::Function("f", std::vector<casadi::MX>{p, center},
-//                                  std::vector<casadi::MX>{casadi::MX::sumsqr(p-center)-0.5});
-        //casadi::MX dists(1, NUM_STEPS-1);
+        // add a gaussian
+        std::vector<double> center{0.0, 1.5};
+        double sigma = 1.0;
+        for (auto i: iter::range(1, NUM_STEPS))
+            opti_local.subject_to( casadi::MX::exp(-casadi::MX::sumsqr(pos(all, i)-center)/sigma) < 0.2);
 
-//        std::vector<casadi::MX> obs_params;
-//        obs_params.assign(ldata.size(), opti_local.parameter(2));
-        for(const auto &l : iter::slice(ldata, 0, (int)ldata.size(), 15))
-                for (auto i: iter::range(1, NUM_STEPS))
-                    opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - std::vector<double>{l.dist*sin(l.angle)/1000.0,
-                                                                                               l.dist*cos(l.angle)/1000.0}) > 0.1);
-
-        //opti_local.subject_to(convex_and == true);
-
-        //opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - obs_param_1) > 0.5);
-        //opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - obs_param_2) > 0.5);
-        //opti_local.set_value(convex_and(0, i), casadi::MX::sumsqr(pos(all, i) - obs_param_1) > 0.5);
-
-        // auto lines_cube = get_cube_lines(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-
-        // casadi::MX convex_global_and = opti_local.parameter();
-        //  opti_local.set_value(convex_global_and, true);
-
-        // for (auto i: iter::range(1, NUM_STEPS))
-        // {
-        //     for( auto &d: desp)
-        //     {
-        //         casadi::MX convex_or = opti_local.parameter();
-        //         opti_local.set_value(convex_or, false);
-        //         for (const auto &[A, B, C]: lines_cube)
-        //             convex_or = casadi::MX::logic_or(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) < 0., convex_or);
-
-        //         convex_global_and = casadi::MX::logic_and(convex_or, convex_global_and);
-        //     }
-        // }
-
-        // opti_local.subject_to(convex_global_and == true);
-
-
-//         casadi::MX convex_global_and = opti_local.parameter();
-//         opti_local.set_value(convex_global_and, true);
-
-//         for (auto i: iter::range(1, NUM_STEPS))
-//         {
-//             for( auto &d: desp)
-//             {
-//                 casadi::MX convex_or = opti_local.parameter();
-//                 opti_local.set_value(convex_or, false);
-
-//                 for (const auto &[lines, poly]: free_regions)
-//                 {
-//                     casadi::MX convex_and = opti_local.parameter();
-//                     opti_local.set_value(convex_and, true);
-//                     for (const auto &[A, B, C]: lines)
-//                         convex_and = casadi::MX::logic_and(((pos(0, i)+d[0]) * A + (pos(1, i)+d[1]) * B + C) > 0, convex_and);
-//                     convex_or = casadi::MX::logic_or(convex_or, convex_and);
-//                 }
-// //                opti_local.subject_to(convex_or == true);
-//                 convex_global_and = casadi::MX::logic_and(convex_or, convex_global_and);
-//             }
-//         }
-
-//         opti_local.subject_to(convex_global_and == true);
         // solve NLP ------
         try
         {
@@ -264,11 +215,8 @@ void SpecificWorker::compute()
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
             // move the robot
-            auto factor = std::clamp(1.0*dist_to_target, 0.0, 1.0);
-            //move_robot(advance* factor * gaussian(rotation), rotation);
-            move_robot(advance /** gaussian(rotation)*/, rotation);
-
-            qInfo() << __FUNCTION__ << "Adv: " << advance*factor << "Rot:" << rotation;
+            //move_robot(advance, rotation);
+            qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
             // draw
             auto path = std::vector<double>(solution.value(pos));
