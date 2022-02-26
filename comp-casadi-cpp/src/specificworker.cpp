@@ -62,7 +62,7 @@ void SpecificWorker::initialize(int period)
         this->resize(700,450);
 
         std::vector<double> init_robot{0, 0, 0};
-        NUM_STEPS = 10;
+        NUM_STEPS = 12;
 
         opti = initialize_differential(NUM_STEPS);
 
@@ -86,16 +86,17 @@ void SpecificWorker::compute()
 
     qInfo() << "------------------------";
 
-    // Bill
-    //read_bill();
-
     //base
     auto [current_pose, current_tr] = read_base();
+
+    // Bill
+    read_bill(current_pose);
 
     // laser
     auto &&[laser_poly_robot, laser_poly_world, ldata] = read_laser(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
     //auto free_regions = compute_laser_partitions(laser_poly_robot);
     //draw_partitions(free_regions, QColor("Magenta"));
+    auto laser_gaussians = fit_gaussians_to_laser(ldata, current_pose);
 
     // remove old target draw
     static QGraphicsItem *target_rep = nullptr;
@@ -103,13 +104,13 @@ void SpecificWorker::compute()
         viewer_robot->scene.removeItem(target_rep);
 
     // project target on closest laser perimeter point
-     if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
-                                                         Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
-                                                         ldata,
-                                                         laser_poly_robot); t.has_value())
-         target.pos = e2q(from_robot_to_world(t.value(), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha));
-
-    target_rep = viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkRed"), QBrush(QColor("DarkRed")));
+//     if(auto t = find_inside_target(from_world_to_robot( target.to_eigen(),
+//                                                         Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha),
+//                                                         ldata,
+//                                                         laser_poly_robot); t.has_value())
+//         target.pos = e2q(from_robot_to_world(t.value(), Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha));
+//
+//    target_rep = viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkRed"), QBrush(QColor("DarkRed")));
 
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     double dist_to_target = (current_tr - target.to_eigen_meters()).norm();
@@ -126,70 +127,38 @@ void SpecificWorker::compute()
                                                                                        previous_values[3 * i + 1],
                                                                                        previous_values[3 * i + 2]});
 
-//         else   // initialize generating a line segment from 0 to target
-//         {
-//             double landa = 1.0 / (dist_to_target / NUM_STEPS);
-//             for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
-//             {
-//                 opti_local.set_initial(state(casadi::Slice(0, 2), i), e2v(target.to_eigen_meters() * step));
-//                 opti_local.set_initial(state(2, i), 0.0);
-//             }
-//         }
-
         // initial values for state ---
-        auto target_oparam = opti_local.parameter(2);
-        opti_local.set_value(target_oparam, e2v(from_world_to_robot(target.to_eigen_meters(), current_tr, current_pose.alpha)));
-        auto target_angle_param = opti_local.parameter(1);
-        opti_local.set_value(target_angle_param, -M_PI/2.);
+        //auto target_angle_param = opti_local.parameter(1);
+        //opti_local.set_value(target_angle_param, -M_PI/2.);
 
         // cost function
-        auto sum_dist = opti_local.parameter();
         auto sum_dist_target = opti_local.parameter();
-        opti_local.set_value(sum_dist, 0.0);
         opti_local.set_value(sum_dist_target, 0.0);
-        for (auto k: iter::range(NUM_STEPS-1))
-            sum_dist += casadi::MX::sumsqr(pos(all, k + 1) - pos(all, k));
-            // sum_dist += casadi::MX::sumsqr(state(casadi::Slice(0,2), k + 1) - state(casadi::Slice(0,2), k));
-
+        auto t = e2v(from_world_to_robot(target.to_eigen_meters(), current_tr, current_pose.alpha));
         for (auto k: iter::range(NUM_STEPS+1))
-            sum_dist_target += casadi::MX::sumsqr(pos(all, k) - target_oparam);
+            sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
 
-        // opti_local.minimize(1. * sum_dist +
-        //                      casadi::MX::sumsqr(pos(all, -1) - target_oparam)
-        //                     /*0.1 * casadi::MX::sumsqr(rot)*/
-        //                     /*casadi::MX::sumsqr(adv)*/);
-
-
-        opti_local.minimize(sum_dist_target + /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/  casadi::MX::sumsqr(rot));
+        opti_local.minimize( sum_dist_target + /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/  0.1*casadi::MX::sumsqr(rot));
 
         // obstacles
-        double DW = 0.3;
+        //double DW = 0.3;
         //double DL = 0.2;
         //std::vector<std::vector<double>> desp = {{0, 0}}; //{{DW, 0}, { -DW, 0}};
 
-        static std::vector<QGraphicsItem *> balls;
-        if(not balls.empty())
-            for(auto &b : balls) viewer_robot->scene.removeItem(b);
-        balls.clear();
-
-        QPen tip_color_pen(QColor("DarkGreen"));
-        QBrush tip_color_brush(QColor("DarkGreen"));
-        for(const auto &l : iter::slice(ldata, 0, (int)ldata.size(), 15))  //Replace by a non-homogenous sampling of the laser border
-        {
-            auto x = l.dist * sin(l.angle);
-            auto y = l.dist * cos(l.angle);
-            QPointF pw(robot_polygon->mapToScene(QPointF(x-100,y-100)));
-            balls.push_back(viewer_robot->scene.addEllipse(QRectF(pw.x(), pw.y(), 200, 200), tip_color_pen, tip_color_brush));
-            std::vector<double> point{x/1000.0, y/1000.0};
+        // add line between points gaussians
+        for(const auto &lg : laser_gaussians)
             for (auto i: iter::range(1, NUM_STEPS))
-                opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - point) > 0.1);
-        }
+            {
+                casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - lg.mu);
+                opti_local.subject_to(casadi::MX::exp(-casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < 0.1);
+            }
 
-        // add a gaussian
-        std::vector<double> center{0.0, 1.5};
-        double sigma = 1.0;
-        for (auto i: iter::range(1, NUM_STEPS))
-            opti_local.subject_to( casadi::MX::exp(-casadi::MX::sumsqr(pos(all, i)-center)/sigma) < 0.2);
+        // add point gaussians
+        double sigma = 0.1;
+        QPolygonF pl = ramer_douglas_peucker(ldata, 70);
+        for(const auto &p : pl)
+            for (auto i: iter::range(1, NUM_STEPS))
+                opti_local.subject_to( casadi::MX::exp(-casadi::MX::sumsqr(pos(all, i)-std::vector<double>{p.x()/1000,p.y()/1000})/sigma) < 0.2);
 
         // solve NLP ------
         try
@@ -209,13 +178,13 @@ void SpecificWorker::compute()
             std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
             auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
             auto rotation = std::vector<double>(solution.value(rot)).front();
-            qInfo() << std::vector<double>(solution.value(rot));
+            //qInfo() << std::vector<double>(solution.value(rot));
             qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
             qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
             // move the robot
-            //move_robot(advance, rotation);
+            move_robot(advance * gaussian(rotation), rotation);
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
             // draw
@@ -231,6 +200,73 @@ void SpecificWorker::compute()
         qInfo() << __FUNCTION__ << "Stopping";
     }
         // viewer_robot->scene.addEllipse(target.pos.x()-100./2, target.pos.y()-100./2, 100. , 100., QPen("DarkBlue"), QBrush(QColor("DarkBlue")));
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+std::vector<SpecificWorker::Gaussian> SpecificWorker::fit_gaussians_to_laser(const RoboCompLaser::TLaserData &ldata,
+                                                                             const RoboCompGenericBase::TBaseState &bState)
+{
+    static std::vector<QGraphicsItem *> balls;
+    static std::vector<QGraphicsItem *> elipses;
+    std::vector<Gaussian> gaussians;
+
+    const float THRESHOLD = 0.2;
+    const float log_thr = log(THRESHOLD);
+
+    if(not balls.empty())
+        for(auto &b : balls) viewer_robot->scene.removeItem(b);
+    balls.clear();
+    if(not elipses.empty())
+        for(auto &b : elipses) viewer_robot->scene.removeItem(b);
+    elipses.clear();
+
+    QPen tip_color_pen(QColor("DarkGreen"));
+    QBrush tip_color_brush(QColor("DarkGreen"));
+    QPolygonF poly_laser = ramer_douglas_peucker(ldata, 70);
+    for(const auto &l : poly_laser)
+    {
+        QPointF pw(robot_polygon->mapToScene(QPointF(l.x() - 100, l.y() - 100)));
+        balls.push_back(viewer_robot->scene.addEllipse(QRectF(pw.x(), pw.y(), 200, 200), tip_color_pen, tip_color_brush));
+    }
+
+    for(auto &&par : iter::sliding_window(poly_laser, 2))
+    {
+        const auto p1 = q2e(par[0]/1000.0);
+        const auto p2 = q2e(par[1]/1000.0);
+        Eigen::Vector2f mean = (p1+p2)/2.0;
+        // compute 1D variance
+        Eigen::Vector2f dist = p1-mean;
+        float sx = -dist.squaredNorm()/(2.0*log_thr);
+        float sy = 0.1; // short side fixed varience
+        float sxy = 0.0;
+        Eigen::Matrix2f S;
+        S << sx, sxy, sxy, sy;
+        Eigen::Vector2f dir = p2-p1;
+        float ang = atan2(dir.y(), dir.x());
+        Eigen::Matrix2f R;
+        R << cos(ang), -sin(ang), sin(ang), cos(ang);  // CCW
+        // rotate covariance
+        auto SR = R * S * R.transpose();
+        // draw, compute eigenvectors
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix2f> e_solver(SR);
+        auto a_values = e_solver.eigenvalues();
+        auto a_vectors = e_solver.eigenvectors();
+        float d_angle = atan2(a_vectors.col(1)(1), a_vectors.col(1)(0));  // largest eigenvector
+        auto el_ptr = viewer_robot->scene.addEllipse(QRectF(-fabs(a_values(1)*1000*1.5), -fabs(a_values(0)*1000*1.5),
+                                                            3*a_values(1)*1000, 3*a_values(0)*1000), QPen(QColor("blue"),50));
+        QPointF mean_w(robot_polygon->mapToScene(QPointF(mean.x()*1000, mean.y()*1000)));
+        el_ptr->setPos(mean_w);
+        el_ptr->setRotation(qRadiansToDegrees(d_angle) + qRadiansToDegrees(bState.alpha));
+        elipses.push_back(el_ptr);
+
+        // build return type
+        Eigen::MatrixX2f iS = SR.inverse();
+        Gaussian g;
+        g.mu = std::vector<double>{mean.x(), mean.y()};
+        g.i_sigma = casadi::MX::vertcat({casadi::MX::horzcat({iS(0,0), iS(0,1)}),
+                                         casadi::MX::horzcat({iS(1,0), iS(1,1)})});
+        gaussians.push_back(g);
+    }
+    return gaussians;
 }
 
 SpecificWorker::Lines SpecificWorker::get_cube_lines(const Eigen::Vector2d &robot_tr, double robot_angle)
@@ -411,7 +447,7 @@ std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> SpecificWorker::read
         for (auto &&[i, p] : poly_robot | iter::enumerate)
             poly_world[i] = e2q(from_robot_to_world(Eigen::Vector2d(p.x(), p.y()),  robot_tr, robot_angle));
 
-        //poly_robot.pop_back();
+        poly_robot << QPointF(0, 0);
         draw_laser(poly_robot);
     }
     catch (const Ice::Exception &e) { std::cout << e.what() << std::endl; }
@@ -432,13 +468,14 @@ std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> SpecificWorker::rea
     catch(const Ice::Exception &e){ qInfo() << "Error connecting to base"; std::cout << e.what() << std::endl;}
     return std::make_tuple(current_pose, current_tr);  
 }
-bool SpecificWorker::read_bill()
+bool SpecificWorker::read_bill(const RoboCompGenericBase::TBaseState &bState)
 {
     Target my_target;
     try
     {
         auto pose = billcoppelia_proxy->getPose();
-        target.pos = QPointF(pose.x, pose.y);
+        QLineF r_to_target(QPointF(pose.x, pose.y), QPointF(bState.x, bState.z));
+        target.pos = r_to_target.pointAt(1000.0 / r_to_target.length());
         viewer_robot->scene.removeItem(target.draw);
         target.active = true;
         target.draw = viewer_robot->scene.addEllipse(target.pos.x()-50, target.pos.y()-50, 100, 100, QPen(QColor("magenta")), QBrush(QColor("magenta")));
@@ -465,13 +502,13 @@ void SpecificWorker::draw_laser(const QPolygonF &poly_world) // robot coordinate
 void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vector2d &tr_world, double my_rot)
 {
     static std::vector<QGraphicsEllipseItem *> path_paint;
-    static QString path_color = "DarkBlue";
+    static QString path_color = "Orange";
 
     for(auto p : path_paint)
         viewer_robot->scene.removeItem(p);
     path_paint.clear();
 
-    uint s = 100;
+    uint s = 200;
     std::vector<Eigen::Vector2d> qpath(path.size()/2);
     for(auto &&[i, p] : iter::chunked(path, 2) | iter::enumerate)
     {

@@ -38,6 +38,8 @@
 #include <abstract_graphic_viewer/abstract_graphic_viewer.h>
 #include "polypartition.h"
 //#include <template_utilities/template_utilities.h>
+#include <Eigen/Eigenvalues>
+
 
 class SpecificWorker : public GenericWorker
 {
@@ -61,11 +63,12 @@ private:
     void move_robot(float adv, float rot, float side = 0);
     std::vector<double> e2v(const Eigen::Vector2d &v);
     QPointF e2q(const Eigen::Vector2d &v);
+    inline Eigen::Vector2f q2e(const QPointF &p) const {return Eigen::Vector2f(p.x(), p.y());};
     Eigen::Vector2d from_robot_to_world(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang);
     Eigen::Vector2d from_world_to_robot(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang);
     void draw_path(const std::vector<double> &path,  const Eigen::Vector2d &tr_world, double my_rot);
 
-
+    // casadi
     casadi::Opti opti;
     int NUM_STEPS;
     casadi::MX state;
@@ -113,6 +116,15 @@ private:
     Lines get_cube_lines(const Eigen::Vector2d &robot_tr, double robot_angle);
 
     // Bill
-    bool read_bill();
+    bool read_bill(const RoboCompGenericBase::TBaseState &bState);
+
+    // gaussians
+    struct Gaussian
+    {
+        casadi::MX mu;
+        casadi::MX i_sigma;
+    };
+    std::vector<SpecificWorker::Gaussian> fit_gaussians_to_laser(const RoboCompLaser::TLaserData &ldata, const RoboCompGenericBase::TBaseState &bState);
+
 };
 #endif
