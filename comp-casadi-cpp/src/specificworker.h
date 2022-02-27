@@ -57,6 +57,17 @@ public slots:
     void new_target_slot(QPointF);
 
 private:
+
+    struct Constants
+    {
+        double gauss_dist = 0.1;  //m
+        double point_dist = 0.2;   // the lower the further away
+        double point_sigma = 0.1;
+        double gauss_value_for_point = 0.1;
+        double gauss_short_side_variance = 0.1;
+        float min_dist_to_target = 0.15;
+    };
+    Constants consts;
     bool startup_check_flag;
     AbstractGraphicViewer *viewer_robot;
     casadi::Opti initialize_differential(const int N);
@@ -68,6 +79,14 @@ private:
     Eigen::Vector2d from_world_to_robot(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang);
     void draw_path(const std::vector<double> &path,  const Eigen::Vector2d &tr_world, double my_rot);
 
+    // gaussians
+    struct Gaussian
+    {
+        casadi::MX mu;
+        casadi::MX i_sigma;
+    };
+    std::vector<SpecificWorker::Gaussian> fit_gaussians_to_laser(const QPolygonF &poly_laser_robot, const RoboCompGenericBase::TBaseState &bState, bool draw);
+
     // casadi
     casadi::Opti opti;
     int NUM_STEPS;
@@ -78,13 +97,16 @@ private:
     casadi::MX adv;
     casadi::MX rot;
     std::vector<Eigen::Vector2d> convex_polygon;
+    std::optional<std::tuple<double, double, casadi::OptiSol>> minimize(const QPolygonF &poly_laser_robot,
+                                                                        const vector<Gaussian> &laser_gaussians,
+                                                                        const Eigen::Vector3d &current_pose_meters);
 
     //robot
     const int ROBOT_LENGTH = 400;
     QGraphicsPolygonItem *robot_polygon;
     QGraphicsEllipseItem *laser_in_robot_polygon;
     void draw_laser(const QPolygonF &poly_robot);
-    std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector2d> read_base();
+    std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector3d> read_base();
     std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> read_laser(const Eigen::Vector2d &robot_tr, double robot_angle);
     float gaussian(float x);
 
@@ -100,7 +122,7 @@ private:
         QGraphicsEllipseItem *draw = nullptr;
     };
     Target target;
-    std::vector<double> previous_values;
+    std::vector<double> previous_values_of_solution;
 
     // convex parrtitions
     using Point = std::pair<float, float>;  //only for RDP, change to QPointF
@@ -118,13 +140,6 @@ private:
     // Bill
     bool read_bill(const RoboCompGenericBase::TBaseState &bState);
 
-    // gaussians
-    struct Gaussian
-    {
-        casadi::MX mu;
-        casadi::MX i_sigma;
-    };
-    std::vector<SpecificWorker::Gaussian> fit_gaussians_to_laser(const RoboCompLaser::TLaserData &ldata, const RoboCompGenericBase::TBaseState &bState);
-
+    void draw_target(const Target &target);
 };
 #endif
