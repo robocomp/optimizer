@@ -89,7 +89,7 @@ void SpecificWorker::compute()
     auto [current_pose, current_pose_meters] = read_base();
 
     // Bill
-    read_bill(current_pose);
+    //read_bill(current_pose);
 
     // laser
     auto &&[laser_poly_robot, laser_poly_world, ldata] = read_laser(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
@@ -164,7 +164,7 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
             //for(auto &b : body_offset)
             {
                 casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - lg.mu);
-                opti_local.subject_to(casadi::MX::exp(-casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
+                opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
             }
 
     // add point gaussians
@@ -172,7 +172,7 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
     for (const auto &p: poly_laser_robot)
         for (auto i: iter::range(1, NUM_STEPS))
             //for(auto &b : body_offset)
-                opti_local.subject_to(casadi::MX::exp(-casadi::MX::sumsqr(pos(all, i) - std::vector<double>{p.x() / 1000, p.y() / 1000}) / sigma) < consts.point_dist);
+                opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(pos(all, i) - std::vector<double>{p.x() / 1000, p.y() / 1000}) / sigma) < consts.point_dist);
 
     // solve NLP ------
     try
@@ -301,7 +301,8 @@ SpecificWorker::fit_gaussians_to_laser(const QPolygonF &poly_laser_robot, const 
         // compute 1D variance
         Eigen::Vector2f dist = p1-mean;
         float sx = -dist.squaredNorm()/(2.0*log_thr);
-        float sy = consts.gauss_short_side_variance; // short side fixed varience
+        float sy;
+        if(sx < 0) sy = sx; else sy = sx/50.0;
         Eigen::Matrix2f S;
         S << sx, 0.0, 0.0, sy;
         Eigen::Vector2f dir = p2-p1;
@@ -319,7 +320,7 @@ SpecificWorker::fit_gaussians_to_laser(const QPolygonF &poly_laser_robot, const 
             auto a_vectors = e_solver.eigenvectors();
             float d_angle = atan2(a_vectors.col(1)(1), a_vectors.col(1)(0));  // largest eigenvector
             auto el_ptr = viewer_robot->scene.addEllipse(QRectF(-fabs(a_values(1) * 1000 * 1.5), -fabs(a_values(0) * 1000 * 1.5),
-                                                                3 * a_values(1) * 1000, 3 * a_values(0) * 1000), QPen(QColor("blue"), 50));
+                                                                3 * fabs(a_values(1) * 1000), 3 * fabs(a_values(0) * 1000)), QPen(QColor("blue"), 50));
             QPointF mean_w(robot_polygon->mapToScene(QPointF(mean.x() * 1000, mean.y() * 1000)));
             el_ptr->setPos(mean_w);
             el_ptr->setRotation(qRadiansToDegrees(d_angle) + qRadiansToDegrees(bState.alpha));

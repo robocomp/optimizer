@@ -62,9 +62,9 @@ private:
     {
         double gauss_dist = 0.1;  //m
         double point_dist = 0.2;   // the lower the further away
-        double point_sigma = 0.1;
-        double gauss_value_for_point = 0.1;
-        double gauss_short_side_variance = 0.1;
+        double point_sigma = 0.07;
+        double gauss_value_for_point = 0.3;
+        double gauss_short_side_variance = 0.3;
         float min_dist_to_target = 0.15;
     };
     Constants consts;
