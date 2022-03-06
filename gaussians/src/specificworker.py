@@ -29,10 +29,15 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 from rdp import rdp
 from itertools import islice
+from dataclasses import dataclass
 
 sys.path.append('/opt/robocomp/lib')
 console = Console(highlight=False)
 
+@dataclass
+class Gaussian:
+    mu: []
+    S: []
 
 class SpecificWorker(GenericWorker):
     def __init__(self, proxy_map, startup_check=False):
@@ -41,6 +46,7 @@ class SpecificWorker(GenericWorker):
         if startup_check:
             self.startup_check()
         else:
+            gaussians = []
             self.timer.timeout.connect(self.compute)
             self.timer.setSingleShot(True)
             self.timer.start(self.Period)
@@ -57,6 +63,7 @@ class SpecificWorker(GenericWorker):
 
         try:
             ldata = self.laser_proxy.getLaserData()
+            bState = self.differentialrobot_proxy.getBaseState()
         except:
             print("laser data read failed")
             return
@@ -68,8 +75,13 @@ class SpecificWorker(GenericWorker):
 
         fig = plt.figure()
         ax = fig.add_subplot(211, aspect='auto')
-        C = 0.2
+        ax2 = fig.add_subplot(212, aspect='auto')
+        x = np.linspace(-5, 5, 100)
+        y = np.linspace(-5, 5, 100)
+        xv, yv = np.meshgrid(x, y)
+        C = 0.3
         lC = np.log(C)
+        self.gaussians = []
 
         for i in range(len(rdp_points) - 1):
             pr1, pr2 = rdp_points[i: i + 2]
@@ -80,7 +92,10 @@ class SpecificWorker(GenericWorker):
             e1 = p1 - mu
             sx = -(e1 @ e1) / (2 * lC)
             print('Computed sx', sx)
-            sy = sx/10
+            if sx < 0:
+                sy = sx
+            else:
+                sy = sx/50
             sxy = 0
 
             K = np.array([[sx, sxy], [sxy, sy]])
@@ -92,6 +107,7 @@ class SpecificWorker(GenericWorker):
             R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])  # CCW
 
             KR = R @ K @ R.transpose()
+            self.gaussians.append(Gaussian(mu, KR))
             print('KR', KR)
 
             g = self.gauss(e1, KR, C)
@@ -113,22 +129,29 @@ class SpecificWorker(GenericWorker):
             ax.set_xlim(-5, 5)
             ax.set_ylim(-5, 5)
 
-            # ax = fig.add_subplot(212, aspect='auto')
-            # x = np.linspace(-5, 5, 100)
-            # y = np.linspace(-5, 5, 100)
-            # xv, yv = np.meshgrid(x, y)
-            # Z = np.zeros((100, 100))
-            # for i in range(100):
-            #     for j in range(100):
-            #         Z[i, j] = self.gauss(np.array([xv[i, j] - mu[0], yv[i, j] - mu[1]]), KR, C)
-            # h = ax.contourf(xv, yv, Z)
+        # add symmetric gaussians in points
+        gauss_points = []
+        for p in rdp_points:
+            gauss_points.append(Gaussian(np.array(p)/1000, [[0.07, 0], [0, 0.07]]))
+
+        Z = np.zeros((100, 100))
+        for i in range(100):
+            for j in range(100):
+                vals = []
+                for g in self.gaussians:
+                    vals.append(self.gauss(np.array([xv[i, j] - g.mu[0], yv[i, j] - g.mu[1]]), g.S, C))
+                for g in gauss_points:
+                    vals.append(self.gauss(np.array([xv[i, j] - g.mu[0], yv[i, j] - g.mu[1]]), g.S, C))
+                Z[i, j] = np.max(vals)
+        ax2.contourf(xv, yv, Z)
         plt.show()
 
         return True
 
     def gauss(self, e, S, C):
         v = np.exp(-0.5 * (e.transpose() @ np.linalg.inv(S) @ e))
-        if v > C:
+        if v >= 0.1:
+
             return v
         else:
             return 0
