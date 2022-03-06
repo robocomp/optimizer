@@ -1,0 +1,14 @@
+import "Laser.idsl";
+import "DifferentialRobot.idsl";
+import "BillCoppelia.idsl";
+
+Component gaussians
+{
+    Communications
+    {
+        requires Laser, DifferentialRobot, BillCoppelia;
+    };
+    language Python;
+    gui Qt(QWidget);
+};
+
