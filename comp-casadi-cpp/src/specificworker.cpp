@@ -62,7 +62,7 @@ void SpecificWorker::initialize(int period)
         this->resize(700,450);
 
         //std::vector<double> init_robot{0, 0, 0};
-        NUM_STEPS = 12;
+        NUM_STEPS = 15;
 
         opti = initialize_differential(NUM_STEPS);
 
