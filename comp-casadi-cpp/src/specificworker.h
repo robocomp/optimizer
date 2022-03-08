@@ -60,6 +60,7 @@ private:
 
     struct Constants
     {
+        int num_steps = 10;
         double gauss_dist = 0.1;  //m
         double point_dist = 0.2;   // the lower the further away
         double point_sigma = 0.07;
@@ -87,29 +88,6 @@ private:
     };
     std::vector<SpecificWorker::Gaussian> fit_gaussians_to_laser(const QPolygonF &poly_laser_robot, const RoboCompGenericBase::TBaseState &bState, bool draw);
 
-    // casadi
-    casadi::Opti opti;
-    int NUM_STEPS;
-    casadi::MX state;
-    casadi::MX pos;
-    casadi::MX phi;
-    casadi::MX control;
-    casadi::MX adv;
-    casadi::MX rot;
-    std::vector<Eigen::Vector2d> convex_polygon;
-    std::optional<std::tuple<double, double, casadi::OptiSol>> minimize(const QPolygonF &poly_laser_robot,
-                                                                        const vector<Gaussian> &laser_gaussians,
-                                                                        const Eigen::Vector3d &current_pose_meters);
-
-    //robot
-    const int ROBOT_LENGTH = 400;
-    QGraphicsPolygonItem *robot_polygon;
-    QGraphicsEllipseItem *laser_in_robot_polygon;
-    void draw_laser(const QPolygonF &poly_robot);
-    std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector3d> read_base();
-    std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> read_laser(const Eigen::Vector2d &robot_tr, double robot_angle);
-    float gaussian(float x);
-
     // target
     struct Target
     {
@@ -123,6 +101,29 @@ private:
     };
     Target target;
     std::vector<double> previous_values_of_solution;
+
+    // casadi
+    casadi::Opti opti;
+    casadi::MX state;
+    casadi::MX pos;
+    casadi::MX phi;
+    casadi::MX control;
+    casadi::MX adv;
+    casadi::MX rot;
+    std::vector<Eigen::Vector2d> convex_polygon;
+    std::optional<std::tuple<double, double, casadi::OptiSol>> minimize(const Target &my_target,
+                                                                        const QPolygonF &poly_laser_robot,
+                                                                        const vector<Gaussian> &laser_gaussians,
+                                                                        const Eigen::Vector3d &current_pose_meters);
+
+    //robot
+    const int ROBOT_LENGTH = 400;
+    QGraphicsPolygonItem *robot_polygon;
+    QGraphicsEllipseItem *laser_in_robot_polygon;
+    void draw_laser(const QPolygonF &poly_robot);
+    std::tuple<RoboCompGenericBase::TBaseState, Eigen::Vector3d> read_base();
+    std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> read_laser(const Eigen::Vector2d &robot_tr, double robot_angle);
+    float gaussian(float x);
 
     // convex parrtitions
     using Point = std::pair<float, float>;  //only for RDP, change to QPointF

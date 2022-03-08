@@ -61,10 +61,7 @@ void SpecificWorker::initialize(int period)
         robot_polygon = rp;
         this->resize(700,450);
 
-        //std::vector<double> init_robot{0, 0, 0};
-        NUM_STEPS = 15;
-
-        opti = initialize_differential(NUM_STEPS);
+        opti = initialize_differential(consts.num_steps);
 
         // connect signal from mouse to set target
         connect(viewer_robot, &AbstractGraphicViewer::new_mouse_coordinates, [this](QPointF p) mutable
@@ -95,18 +92,22 @@ void SpecificWorker::compute()
     auto &&[laser_poly_robot, laser_poly_world, ldata] = read_laser(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
     auto laser_gaussians = fit_gaussians_to_laser(laser_poly_robot, current_pose, true);
 
+    // process target candidate.
+    // If inside LIDAR polygon then OK;
+    // if outside propose an inside subtarget;
+    //     search for openings in lidar-polygon and select a near one as the next subtarget
+
     // check current target distance
     // double dist_to_target = (current_pose_meters(Eigen::seq(Eigen::fix<0>, Eigen::fix<1>))) - target.to_eigen_meters()).norm(); VERSION 3.4
     double dist_to_target = (Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()) - target.to_eigen_meters()).norm();
     if( target.active and dist_to_target > consts.min_dist_to_target)
-    {
-       if(auto r = minimize(laser_poly_robot, laser_gaussians, current_pose_meters); r.has_value())
+       if(auto r = minimize(target, laser_poly_robot, laser_gaussians, current_pose_meters); r.has_value())
        {
            auto [advance, rotation, solution] = r.value();
            try
            {
                // move the robot
-               move_robot(advance * gaussian(rotation), rotation);
+               //move_robot(advance * gaussian(rotation), rotation);
                qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
                // draw
@@ -116,7 +117,10 @@ void SpecificWorker::compute()
            catch (...)
            { std::cout << "No solution found" << std::endl; }
        }
-    }
+        else // do something to avoid go blind
+        {
+
+        }
     else  // at  target
     {
         move_robot(0, 0);
@@ -125,7 +129,8 @@ void SpecificWorker::compute()
     }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minimize(const QPolygonF &poly_laser_robot,
+std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minimize(const Target &my_target,
+                                                                                    const QPolygonF &poly_laser_robot,
                                                                                     const std::vector<Gaussian> &laser_gaussians,
                                                                                     const Eigen::Vector3d &current_pose_meters)
 {
@@ -135,7 +140,7 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
 
     // Warm start
     if (not previous_values_of_solution.empty())
-        for (auto i: iter::range(1, NUM_STEPS))
+        for (auto i: iter::range(1, consts.num_steps))
             opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values_of_solution[3 * i],
                                                                                   previous_values_of_solution[3 * i + 1],
                                                                                   previous_values_of_solution[3 * i + 2]});
@@ -147,30 +152,30 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
     // cost function
     auto sum_dist_target = opti_local.parameter();
     opti_local.set_value(sum_dist_target, 0.0);
-    auto t = e2v(from_world_to_robot(target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
-    for (auto k: iter::range(2, NUM_STEPS + 1))
+    auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
+    for (auto k: iter::range(2, consts.num_steps + 1))
         sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
-
-    opti_local.minimize(sum_dist_target + /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/  0.1 * casadi::MX::sumsqr(rot));
+    opti_local.minimize(sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+                        0.1 * casadi::MX::sumsqr(rot));
 
     // obstacles
     double DW = 0.3;
     //double DL = 0.3;
-    std::vector<std::vector<double>> body_offset = {{0, 0}, {DW, 0}, { -DW, 0}};
-
+    // std::vector<std::vector<double>> body_offset = {{0, 0}, {DW, 0}, { -DW, 0}};
+    std::vector<std::vector<double>> body_offset = {{0, 0}, {0, DW}, {0, -DW}};
     // add line between points gaussians
     for (const auto &lg : laser_gaussians)
-        for (auto i: iter::range(1, NUM_STEPS))
-            //for(auto &b : body_offset)
+        for (auto i: iter::range(1, consts.num_steps))
+            for(auto &b : body_offset)
             {
-                casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - lg.mu);
-                opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
+                casadi::MX dist = casadi::MX::sumsqr(pos(all, i) + b - lg.mu);
+                opti_local.subject_to(50 * casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
             }
 
     // add point gaussians
     double sigma = consts.point_sigma;
     for (const auto &p: poly_laser_robot)
-        for (auto i: iter::range(1, NUM_STEPS))
+        for (auto i: iter::range(1, consts.num_steps))
             //for(auto &b : body_offset)
                 opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(pos(all, i) - std::vector<double>{p.x() / 1000, p.y() / 1000}) / sigma) < consts.point_dist);
 
@@ -206,14 +211,13 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     auto opti = casadi::Opti();
     auto specific_options = casadi::Dict();
     auto generic_options = casadi::Dict();
-    specific_options["accept_after_max_steps"] = 100;
+    //specific_options["accept_after_max_steps"] = 100;
     specific_options["fixed_variable_treatment"] = "relax_bounds";
     //specific_options["print_time"] = 0;
     //specific_options["max_iter"] = 10000;
     specific_options["print_level"] = 0;
-    //specific_options["acceptable_tol"] = 1e-8;
-    //specific_options["acceptable_obj_change_tol"] = 1e-6;
-    //  opti.solver("ipopt", generic_options, specific_options);
+    specific_options["acceptable_tol"] = 1e-8;
+    specific_options["acceptable_obj_change_tol"] = 1e-6;
     opti.solver("ipopt", generic_options, specific_options);
 
 
@@ -302,7 +306,7 @@ SpecificWorker::fit_gaussians_to_laser(const QPolygonF &poly_laser_robot, const 
         Eigen::Vector2f dist = p1-mean;
         float sx = -dist.squaredNorm()/(2.0*log_thr);
         float sy;
-        if(sx < 0) sy = sx; else sy = sx/50.0;
+        if(sx < 0) sy = sx; else sy = sx/10.0;
         Eigen::Matrix2f S;
         S << sx, 0.0, 0.0, sy;
         Eigen::Vector2f dir = p2-p1;
