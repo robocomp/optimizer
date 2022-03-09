@@ -153,10 +153,13 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
     auto sum_dist_target = opti_local.parameter();
     opti_local.set_value(sum_dist_target, 0.0);
     auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
-    for (auto k: iter::range(2, consts.num_steps + 1))
-        sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
-    opti_local.minimize(sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
-                        0.1 * casadi::MX::sumsqr(rot));
+//    for (auto k: iter::range(2, consts.num_steps +1))
+//        sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
+    for (auto k: iter::range(2, consts.num_steps))
+        sum_dist_target += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
+    opti_local.minimize( sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+                        0.1 * casadi::MX::sumsqr(rot) +
+                        casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
 
     // obstacles
     double DW = 0.3;
@@ -166,9 +169,9 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
     // add line between points gaussians
     for (const auto &lg : laser_gaussians)
         for (auto i: iter::range(1, consts.num_steps))
-            for(auto &b : body_offset)
+    //        for(auto &b : body_offset)
             {
-                casadi::MX dist = casadi::MX::sumsqr(pos(all, i) + b - lg.mu);
+                casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - lg.mu);
                 opti_local.subject_to(50 * casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
             }
 
