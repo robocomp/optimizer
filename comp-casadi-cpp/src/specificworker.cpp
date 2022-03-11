@@ -86,11 +86,11 @@ void SpecificWorker::compute()
     auto [current_pose, current_pose_meters] = read_base();
 
     // Bill
-    //read_bill(current_pose);
+    read_bill(current_pose);  // sets target at 1m from Bill
 
     // laser
     auto &&[laser_poly_robot, laser_poly_world, ldata] = read_laser(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-    auto laser_gaussians = fit_gaussians_to_laser(laser_poly_robot, current_pose, true);
+    auto laser_gaussians = fit_gaussians_to_laser(laser_poly_robot, current_pose, false);
 
     // process target candidate.
     // If inside LIDAR polygon then OK;
@@ -100,14 +100,16 @@ void SpecificWorker::compute()
     // check current target distance
     // double dist_to_target = (current_pose_meters(Eigen::seq(Eigen::fix<0>, Eigen::fix<1>))) - target.to_eigen_meters()).norm(); VERSION 3.4
     double dist_to_target = (Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()) - target.to_eigen_meters()).norm();
+    static float adv_r=0, rot_r=0;
     if( target.active and dist_to_target > consts.min_dist_to_target)
        if(auto r = minimize(target, laser_poly_robot, laser_gaussians, current_pose_meters); r.has_value())
        {
            auto [advance, rotation, solution] = r.value();
+           adv_r = advance; rot_r = rotation;
            try
            {
                // move the robot
-               //move_robot(advance * gaussian(rotation), rotation);
+               move_robot(advance * gaussian(rotation), rotation);
                qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
                // draw
@@ -119,7 +121,7 @@ void SpecificWorker::compute()
        }
         else // do something to avoid go blind
         {
-
+            //move_robot(adv_r/2, rot_r/2);
         }
     else  // at  target
     {
@@ -153,13 +155,13 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
     auto sum_dist_target = opti_local.parameter();
     opti_local.set_value(sum_dist_target, 0.0);
     auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
-//    for (auto k: iter::range(2, consts.num_steps +1))
-//        sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
-    for (auto k: iter::range(2, consts.num_steps))
-        sum_dist_target += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
-    opti_local.minimize( sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
-                        0.1 * casadi::MX::sumsqr(rot) +
-                        casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
+    for (auto k: iter::range(2, consts.num_steps +1))
+        sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
+//    for (auto k: iter::range(2, consts.num_steps))
+//        sum_dist_target += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
+    opti_local.minimize( 0.1 * sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+                         0.1 * casadi::MX::sumsqr(rot) );
+//                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
 
     // obstacles
     double DW = 0.3;
@@ -172,7 +174,7 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
     //        for(auto &b : body_offset)
             {
                 casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - lg.mu);
-                opti_local.subject_to(50 * casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
+                opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
             }
 
     // add point gaussians
@@ -226,7 +228,6 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
 
     // ---- state variables ---------
     state = opti.variable(3, N+1);
-    // state = opti.variable(2, N+1);
     pos = state(casadi::Slice(0,2), all);
     phi = state(2, all);
 
@@ -254,18 +255,9 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
         opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
     }
 
-    // Linear model
-    // double dt=1;
-    // for(const auto k : iter::range(N))  // loop over control intervals
-    // {
-    //     auto x_next = state(all, k) + control(all,k)*dt;
-    //     opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
-    // }
-
-
     // control constraints -----------
-    opti.subject_to(opti.bounded(-0.1, adv, 0.8));  // control is limited meters
-    opti.subject_to(opti.bounded(-0.5, rot, 0.5));         // control is limited
+    opti.subject_to(opti.bounded(consts.min_advance_value, adv, consts.max_advance_value));  // control is limited meters
+    opti.subject_to(opti.bounded(-consts.max_rotation_value, rot, consts.max_rotation_value));         // control is limited
 
     // forward velocity constraints -----------
     //opti.subject_to(adv >= 0);
@@ -292,12 +284,15 @@ SpecificWorker::fit_gaussians_to_laser(const QPolygonF &poly_laser_robot, const 
         for(auto &b : elipses) viewer_robot->scene.removeItem(b);
     elipses.clear();
 
-    QPen tip_color_pen(QColor("DarkGreen"));
-    QBrush tip_color_brush(QColor("DarkGreen"));
-    for(const auto &l : poly_laser_robot)
+    if(true)
     {
-        QPointF pw(robot_polygon->mapToScene(QPointF(l.x() - 100, l.y() - 100)));
-        balls.push_back(viewer_robot->scene.addEllipse(QRectF(pw.x(), pw.y(), 200, 200), tip_color_pen, tip_color_brush));
+        QPen tip_color_pen(QColor("DarkGreen"));
+        QBrush tip_color_brush(QColor("DarkGreen"));
+        for (const auto &l: poly_laser_robot)
+        {
+            QPointF pw(robot_polygon->mapToScene(QPointF(l.x(), l.y())));
+            balls.push_back(viewer_robot->scene.addEllipse(QRectF(pw.x()-100, pw.y()-100, 200, 200), tip_color_pen, tip_color_brush));
+        }
     }
 
     for(auto &&par : iter::sliding_window(poly_laser_robot, 2))
@@ -480,7 +475,7 @@ bool SpecificWorker::read_bill(const RoboCompGenericBase::TBaseState &bState)
     {
         auto pose = billcoppelia_proxy->getPose();
         QLineF r_to_target(QPointF(pose.x, pose.y), QPointF(bState.x, bState.z));
-        target.pos = r_to_target.pointAt(1000.0 / r_to_target.length());
+        target.pos = r_to_target.pointAt(700.0 / r_to_target.length());
         if(target.draw != nullptr) viewer_robot->scene.removeItem(target.draw);
         target.active = true;
         target.draw = viewer_robot->scene.addEllipse(target.pos.x()-100, target.pos.y()-100, 200, 200, QPen(QColor("magenta")), QBrush(QColor("magenta")));
@@ -628,8 +623,8 @@ void SpecificWorker::ramer_douglas_peucker_rec(const vector<Point> &pointList, d
 }
 float SpecificWorker::gaussian(float x)
 {
-    const double xset = 0.5;
-    const double yset = 0.5;
+    const double xset = consts.xset_gaussian;
+    const double yset = consts.yset_gaussian;
     const double s = -xset*xset/log(yset);
     return exp(-x*x/s);
 }
