@@ -71,9 +71,14 @@ private:
         double min_advance_value = 0;           // min advance constraint in m/sg
         double xset_gaussian = 0.5;             // gaussian break x set value
         double yset_gaussian = 0.4;             // gaussian break y set value
+        double min_line_dist = 0.4;
     };
     Constants consts;
     bool startup_check_flag;
+    using Ball = std::tuple<Eigen::Vector2d, float>;
+    using Balls = std::vector<Ball>;
+
+    //robot
     AbstractGraphicViewer *viewer_robot;
     casadi::Opti initialize_differential(const int N);
     void move_robot(float adv, float rot, float side = 0);
@@ -82,7 +87,7 @@ private:
     inline Eigen::Vector2f q2e(const QPointF &p) const {return Eigen::Vector2f(p.x(), p.y());};
     Eigen::Vector2d from_robot_to_world(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang);
     Eigen::Vector2d from_world_to_robot(const Eigen::Vector2d &p, const Eigen::Vector2d &robot_tr, double robot_ang);
-    void draw_path(const std::vector<double> &path,  const Eigen::Vector2d &tr_world, double my_rot);
+    void draw_path(const std::vector<double> &path,  const Eigen::Vector2d &tr_world, double my_rot, const Balls &balls);
 
     // gaussians
     struct Gaussian
@@ -106,6 +111,16 @@ private:
     Target target;
     std::vector<double> previous_values_of_solution;
 
+    // convex parrtitions
+    using Point = std::pair<float, float>;  //only for RDP, change to QPointF
+    using Lines = std::vector<std::tuple<float, float, float>>;
+    using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
+    std::optional<Eigen::Vector2d> find_inside_target(const Eigen::Vector2d &target_in_robot, const RoboCompLaser::TLaserData &ldata, const QPolygonF &poly);
+    Obstacles compute_laser_partitions(QPolygonF &laser_poly);
+    QPolygonF ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon);
+    void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
+    void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
+
     // casadi
     casadi::Opti opti;
     casadi::MX state;
@@ -120,6 +135,17 @@ private:
                                                                         const vector<Gaussian> &laser_gaussians,
                                                                         const Eigen::Vector3d &current_pose_meters);
 
+    std::optional<std::tuple<double, double, casadi::OptiSol>> minimize_free(const Target &my_target,
+                                                                             const QPolygonF &poly_laser_robot,
+                                                                             const std::vector<Gaussian> &laser_gaussians,
+                                                                             const Eigen::Vector3d &current_pose_meters,
+                                                                             const Obstacles &obstacles);
+
+    optional<tuple<double, double, casadi::OptiSol, Balls>>
+    minimize_balls(const Target &my_target, const QPolygonF &poly_laser_robot, const vector<Gaussian> &laser_gaussians,
+                   const Eigen::Vector3d &current_pose_meters, const RoboCompLaser::TLaserData &ldata);
+    Ball compute_free_ball(const Eigen::Vector2d &center, const RoboCompLaser::TLaserData &ldata);
+
     //robot
     const int ROBOT_LENGTH = 400;
     QGraphicsPolygonItem *robot_polygon;
@@ -129,15 +155,6 @@ private:
     std::tuple<QPolygonF, QPolygonF, RoboCompLaser::TLaserData> read_laser(const Eigen::Vector2d &robot_tr, double robot_angle);
     float gaussian(float x);
 
-    // convex parrtitions
-    using Point = std::pair<float, float>;  //only for RDP, change to QPointF
-    using Lines = std::vector<std::tuple<float, float, float>>;
-    using Obstacles = std::vector<std::tuple<Lines, QPolygonF>>;
-    std::optional<Eigen::Vector2d> find_inside_target(const Eigen::Vector2d &target_in_robot, const RoboCompLaser::TLaserData &ldata, const QPolygonF &poly);
-    Obstacles compute_laser_partitions(QPolygonF &laser_poly);
-    QPolygonF ramer_douglas_peucker(const RoboCompLaser::TLaserData &ldata, double epsilon);
-    void ramer_douglas_peucker_rec(const vector<Point> &pointList, double epsilon, std::vector<Point> &out);
-    void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
 
     // tests
     Lines get_cube_lines(const Eigen::Vector2d &robot_tr, double robot_angle);
@@ -146,5 +163,6 @@ private:
     bool read_bill(const RoboCompGenericBase::TBaseState &bState);
 
     void draw_target(const Target &target);
+
 };
 #endif

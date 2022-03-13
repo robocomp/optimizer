@@ -86,11 +86,15 @@ void SpecificWorker::compute()
     auto [current_pose, current_pose_meters] = read_base();
 
     // Bill
-    read_bill(current_pose);  // sets target at 1m from Bill
+    //read_bill(current_pose);  // sets target at 1m from Bill
 
     // laser
     auto &&[laser_poly_robot, laser_poly_world, ldata] = read_laser(Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-    auto laser_gaussians = fit_gaussians_to_laser(laser_poly_robot, current_pose, false);
+    //auto laser_gaussians = fit_gaussians_to_laser(laser_poly_robot, current_pose, false);
+    std::vector<Gaussian> laser_gaussians;
+
+    //auto obstacles = compute_laser_partitions(laser_poly_robot);
+    //draw_partitions(obstacles, QColor("blue"));
 
     // process target candidate.
     // If inside LIDAR polygon then OK;
@@ -102,26 +106,29 @@ void SpecificWorker::compute()
     double dist_to_target = (Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()) - target.to_eigen_meters()).norm();
     static float adv_r=0, rot_r=0;
     if( target.active and dist_to_target > consts.min_dist_to_target)
-       if(auto r = minimize(target, laser_poly_robot, laser_gaussians, current_pose_meters); r.has_value())
+       if(auto r = minimize_balls(target, laser_poly_robot, laser_gaussians, current_pose_meters, ldata); r.has_value())
        {
-           auto [advance, rotation, solution] = r.value();
+           robot_polygon->setBrush(QColor("Blue"));
+           auto [advance, rotation, solution, balls] = r.value();
            adv_r = advance; rot_r = rotation;
            try
            {
                // move the robot
-               move_robot(advance * gaussian(rotation), rotation);
+               //move_robot(advance * gaussian(rotation), rotation);
                qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
                // draw
                auto path = std::vector<double>(solution.value(pos));
-               draw_path(path, Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+               draw_path(path, Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha, balls);
            }
            catch (...)
            { std::cout << "No solution found" << std::endl; }
        }
         else // do something to avoid go blind
         {
-            //move_robot(adv_r/2, rot_r/2);
+            move_robot(0, 0);
+            robot_polygon->setBrush(QColor("red"));
+            previous_values_of_solution.clear();
         }
     else  // at  target
     {
@@ -131,10 +138,57 @@ void SpecificWorker::compute()
     }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minimize(const Target &my_target,
+SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &center, const RoboCompLaser::TLaserData &ldata)
+{
+    std::vector<Eigen::Vector2d> lpoints(ldata.size());
+    for(auto &&[i, l] : ldata | iter::enumerate)
+        lpoints[i] = Eigen::Vector2d(l.dist*sin(l.angle)/1000.0, l.dist*cos(l.angle)/1000.0);
+
+    // if ball already big enough return
+    float initial_dist = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();}).norm();
+    if(initial_dist > 1)
+         return std::make_tuple(center, 1);
+
+    // compute the distance to all laser points for center and center +- dx, center +- dy
+    auto dx = Eigen::Vector2d(0.1, 0.0);
+    auto dy = Eigen::Vector2d(0.0, 0.1);
+    auto min_dx_plus = std::ranges::min(lpoints, [c = center + dx](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+    auto min_dx_minus = std::ranges::min(lpoints, [c = center - dx](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+    auto min_dy_plus = std::ranges::min(lpoints, [c = center + dy](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+    auto min_dy_minus = std::ranges::min(lpoints, [c = center - dy](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+
+    // compute normalized gradient
+    auto grad = Eigen::Vector2d(min_dx_plus.norm() - min_dx_minus.norm(), min_dy_plus.norm() - min_dy_minus.norm()).normalized();
+
+    // move  along gradient until ball touches laser perimeter
+    auto ball_hits_the_wall = [lpoints](const Eigen::Vector2d &c, float r)
+        {
+           // check if all laser points are further than r from the center
+           for(auto &p: lpoints)
+            if((p-c).norm() <= r)
+                return true;
+            return false;
+        };
+
+    auto new_center = center;
+    double min_dist = 0;
+    float step = initial_dist;
+    //while(not ball_hits_the_wall(new_center, step) and  min_dist < 1)
+    while(min_dist == initial_dist + step)
+    {
+        new_center = new_center + (grad * step);
+        step = step + 0.1;
+        min_dist = std::ranges::min(lpoints, [c = new_center](auto a, auto b){ return (a-c).norm() < (b-c).norm();}).norm();
+    }
+    std::cout << __FUNCTION__ << new_center*1000 << " " << step << " " << min_dist << std::endl;
+    qInfo() << __FUNCTION__ << "...............";
+    return std::make_tuple(new_center, step-0.1);
+}
+std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>> SpecificWorker::minimize_balls(const Target &my_target,
                                                                                     const QPolygonF &poly_laser_robot,
                                                                                     const std::vector<Gaussian> &laser_gaussians,
-                                                                                    const Eigen::Vector3d &current_pose_meters)
+                                                                                    const Eigen::Vector3d &current_pose_meters,
+                                                                                    const RoboCompLaser::TLaserData &ldata)
 {
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     auto opti_local = opti.copy();
@@ -146,6 +200,223 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
             opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values_of_solution[3 * i],
                                                                                   previous_values_of_solution[3 * i + 1],
                                                                                   previous_values_of_solution[3 * i + 2]});
+    // target in robot RS
+    auto target_robot = from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2));
+
+    // Warm start
+    if (previous_values_of_solution.empty())
+    {
+        previous_values_of_solution.resize(consts.num_steps+1);
+        double landa = 1.0 / (target_robot.norm() / consts.num_steps);
+        for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+        {
+            auto paso = target_robot * step;
+            previous_values_of_solution[3 * i] = paso.x();
+            previous_values_of_solution[3 * i + 1] = paso.y();
+            previous_values_of_solution[3 * i + 2] = 0.0;
+        }
+    }
+
+    // set initial state from guess or previous iteration
+    Balls balls;
+    balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25});  // first point on robot
+    for (auto i: iter::range(1, consts.num_steps))
+    {
+        opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
+                                                                  previous_values_of_solution[3 * i + 1],
+                                                                  previous_values_of_solution[3 * i + 2]});
+        // compute ball from i step from and initial x,y centered ball
+        auto ball = compute_free_ball(Eigen::Vector2d(previous_values_of_solution[3*i],
+                                                      previous_values_of_solution[3*i+1]), ldata);
+        balls.push_back(ball);
+    }
+
+    // cost function
+    auto sum_dist_target = opti_local.parameter();
+    opti_local.set_value(sum_dist_target, 0.0);
+    auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
+    for (auto k: iter::range(2, consts.num_steps +1))
+        sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
+
+    // promote equal distances
+    auto sum_dist_local = opti_local.parameter();
+    opti_local.set_value(sum_dist_local, 0.0);
+    for (auto k: iter::range(2, consts.num_steps +1))
+        sum_dist_local += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
+
+//    for (auto k: iter::range(2, consts.num_steps))
+//        sum_dist_target += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
+    opti_local.minimize( sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+                         0.1 * casadi::MX::sumsqr(rot) +
+                         0.01 * sum_dist_local);
+//                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
+
+    // obstacles
+
+    // solve NLP ------
+    try
+    {
+        auto solution = opti_local.solve();
+        std::string retstat = solution.stats().at("return_status");
+        if (retstat.compare("Solve_Succeeded") != 0)
+        {
+            std::cout << "NOT succeeded" << std::endl;
+            move_robot(0, 0);  //slow down
+            return {};
+        }
+        previous_values_of_solution = std::vector<double>(solution.value(state));
+
+        // print output -----
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
+        auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
+        auto rotation = std::vector<double>(solution.value(rot)).front();
+        //qInfo() << std::vector<double>(solution.value(rot));
+        qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
+        qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
+        return std::make_tuple(advance, rotation, solution, balls);
+    }
+    catch (...) { std::cout << "No solution found" << std::endl;  return {}; }
+}
+std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minimize_free(const Target &my_target,
+                                                                                         const QPolygonF &poly_laser_robot,
+                                                                                         const std::vector<Gaussian> &laser_gaussians,
+                                                                                         const Eigen::Vector3d &current_pose_meters,
+                                                                                         const Obstacles &obstacles)
+{
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    auto opti_local = opti.copy();
+    casadi::Slice all;
+
+    // target in robot RS
+    auto target_robot = from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2));
+
+    // Warm start
+    if (previous_values_of_solution.empty())
+    {
+        previous_values_of_solution.resize(consts.num_steps+1);
+        double landa = 1.0 / (target_robot.norm() / consts.num_steps);
+        for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+        {
+            auto paso = target_robot * step;
+            previous_values_of_solution[3 * i] = paso.x();
+            previous_values_of_solution[3 * i + 1] = paso.y();
+            previous_values_of_solution[3 * i + 2] = 0.0;
+        }
+    }
+
+    // set initial state from guess or previous iteration
+    for (auto i: iter::range(1, consts.num_steps))
+        opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
+                                                                  previous_values_of_solution[3 * i + 1],
+                                                                  previous_values_of_solution[3 * i + 2]});
+
+    // Constraints: Free regions. Select a convex region for each step
+//    for (auto i : iter::range(2, consts.num_steps))
+//    {
+//        for(auto &[line, poly] : obstacles)
+//            if( poly.containsPoint(QPointF(previous_values_of_solution[3 * i], previous_values_of_solution[3 * i + 1]), Qt::OddEvenFill))
+//            {
+//                for(auto &[A,B,C] : line)
+//                    opti_local.subject_to((pos(0, i)*A + pos(1, i)*B + C) > consts.min_line_dist);
+//                break;
+//            }
+//    }
+
+    // initial values for state ---
+    //auto target_angle_param = opti_local.parameter(1);
+    //opti_local.set_value(target_angle_param, -M_PI/2.);
+
+    // cost function
+    auto t = e2v(target_robot);
+    auto sum_dist_target = opti_local.parameter();
+    opti_local.set_value(sum_dist_target, 0.0);
+    for (auto k: iter::range(0, consts.num_steps+1))
+        sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
+
+//    for (auto k: iter::range(2, consts.num_steps))
+//        sum_dist_target += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
+    opti_local.minimize( 0.1 * sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+                         0.1 * casadi::MX::sumsqr(rot) );
+//                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
+
+
+    // solve NLP ------
+    try
+    {
+        auto solution = opti_local.solve();
+        std::string retstat = solution.stats().at("return_status");
+        if (retstat.compare("Solve_Succeeded") != 0)
+        {
+            std::cout << "NOT succeeded" << std::endl;
+            move_robot(0, 0);  //slow down
+            return {};
+        }
+        previous_values_of_solution = std::vector<double>(solution.value(state));
+
+        // print output -----
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
+        auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
+        auto rotation = std::vector<double>(solution.value(rot)).front();
+        //qInfo() << std::vector<double>(solution.value(rot));
+        qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
+        qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
+        return std::make_tuple(advance, rotation, solution);
+    }
+    catch (...) { std::cout << "No solution found" << std::endl;  return {}; }
+}
+std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minimize(const Target &my_target,
+                                                                                    const QPolygonF &poly_laser_robot,
+                                                                                    const std::vector<Gaussian> &laser_gaussians,
+                                                                                    const Eigen::Vector3d &current_pose_meters)
+{
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    auto opti_local = opti.copy();
+    casadi::Slice all;
+
+    // target in robot RS
+    auto target_robot = from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2));
+
+    // Warm start
+    if (previous_values_of_solution.empty())
+    {
+        previous_values_of_solution.resize(consts.num_steps+1);
+        double landa = 1.0 / (target_robot.norm() / consts.num_steps);
+        for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+        {
+            auto paso = target_robot * step;
+            previous_values_of_solution[3 * i] = paso.x();
+            previous_values_of_solution[3 * i + 1] = paso.y();
+            previous_values_of_solution[3 * i + 2] = 0.0;
+        }
+    }
+
+    // set initial state from guess or previous iteration
+    for (auto i: iter::range(1, consts.num_steps))
+        opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
+                                                                  previous_values_of_solution[3 * i + 1],
+                                                                  previous_values_of_solution[3 * i + 2]});
+
+    // Warm start
+    if (previous_values_of_solution.empty())
+    {
+        previous_values_of_solution.resize(consts.num_steps+1);
+        double landa = 1.0 / (target_robot.norm() / consts.num_steps);
+        for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+        {
+            auto paso = target_robot * step;
+            previous_values_of_solution[3 * i] = paso.x();
+            previous_values_of_solution[3 * i + 1] = paso.y();
+            previous_values_of_solution[3 * i + 2] = 0.0;
+        }
+    }
+
+    // set initial state from guess or previous iteration
+    for (auto i: iter::range(1, consts.num_steps))
+        opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
+                                                                  previous_values_of_solution[3 * i + 1],
+                                                                  previous_values_of_solution[3 * i + 2]});
 
     // initial values for state ---
     //auto target_angle_param = opti_local.parameter(1);
@@ -157,32 +428,39 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
     auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
     for (auto k: iter::range(2, consts.num_steps +1))
         sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
+
+    // promote equal distances
+    auto sum_dist_local = opti_local.parameter();
+    opti_local.set_value(sum_dist_local, 0.0);
+    for (auto k: iter::range(2, consts.num_steps +1))
+        sum_dist_local += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
+
 //    for (auto k: iter::range(2, consts.num_steps))
 //        sum_dist_target += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
-    opti_local.minimize( 0.1 * sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
-                         0.1 * casadi::MX::sumsqr(rot) );
+    opti_local.minimize( sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+                         0.1 * casadi::MX::sumsqr(rot) +
+                         0.01 * sum_dist_local);
 //                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
 
     // obstacles
     double DW = 0.3;
     //double DL = 0.3;
     // std::vector<std::vector<double>> body_offset = {{0, 0}, {DW, 0}, { -DW, 0}};
-    std::vector<std::vector<double>> body_offset = {{0, 0}, {0, DW}, {0, -DW}};
+    //std::vector<std::vector<double>> body_offset = {{0, 0}, {0, DW}, {0, -DW}};
+
     // add line between points gaussians
     for (const auto &lg : laser_gaussians)
         for (auto i: iter::range(1, consts.num_steps))
-    //        for(auto &b : body_offset)
-            {
-                casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - lg.mu);
-                opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
-            }
+        {
+          casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - lg.mu);
+          opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(casadi::MX::mtimes(lg.i_sigma, dist))) < consts.gauss_dist);
+        }
 
     // add point gaussians
     double sigma = consts.point_sigma;
     for (const auto &p: poly_laser_robot)
         for (auto i: iter::range(1, consts.num_steps))
-            //for(auto &b : body_offset)
-                opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(pos(all, i) - std::vector<double>{p.x() / 1000, p.y() / 1000}) / sigma) < consts.point_dist);
+            opti_local.subject_to(casadi::MX::exp(-0.5 * casadi::MX::sumsqr(pos(all, i) - std::vector<double>{p.x() / 1000, p.y() / 1000}) / sigma) < consts.point_dist);
 
     // solve NLP ------
     try
@@ -243,7 +521,7 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
                     casadi::MX::horzcat(std::vector<casadi::MX>{casadi::MX::cos(x(2)), 0.0}),
                     casadi::MX::horzcat(std::vector<casadi::MX>{0.0,      1.0})}
             ), u);};
-    double dt = 1;   // timer interval in secs
+    double dt = 0.5;   // timer interval in secs
     for(const auto k : iter::range(N))  // loop over control intervals
     {
         auto k1 = integrate(state(all, k), control(all,k));
@@ -646,22 +924,34 @@ void SpecificWorker::draw_laser(const QPolygonF &poly_world) // robot coordinate
     laser_polygon = viewer_robot->scene.addPolygon(laser_in_robot_polygon->mapToScene(poly_world), QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(3);
 }
-void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vector2d &tr_world, double my_rot)
+void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vector2d &tr_world, double my_rot, const Balls &balls)
 {
-    static std::vector<QGraphicsEllipseItem *> path_paint;
+    static std::vector<QGraphicsEllipseItem *> path_paint, ball_paint;
     static QString path_color = "Orange";
+    static QString ball_color = "LightBlue";
 
     for(auto p : path_paint)
         viewer_robot->scene.removeItem(p);
     path_paint.clear();
+    for(auto p : ball_paint)
+        viewer_robot->scene.removeItem(p);
+    ball_paint.clear();
 
     uint s = 200;
     std::vector<Eigen::Vector2d> qpath(path.size()/2);
     for(auto &&[i, p] : iter::chunked(path, 2) | iter::enumerate)
     {
-        auto pw = from_robot_to_world(Eigen::Vector2d(p[0]*1000, p[1]*1000), tr_world, my_rot);
+        auto pw = from_robot_to_world(Eigen::Vector2d(p[0]*1000, p[1]*1000), tr_world, my_rot);  // in mm
         path_paint.push_back(viewer_robot->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
         path_paint.back()->setZValue(30);
+    }
+    for(auto &[center, r] : balls)
+    {
+        auto bc = from_robot_to_world(center*1000, tr_world, my_rot);
+        auto nr = r *1000;
+        ball_paint.push_back(viewer_robot->scene.addEllipse(bc.x()-nr/2, bc.y()-nr/2, nr , nr, QPen(QBrush("DarkBlue"),20), QBrush(QColor(ball_color))));
+        ball_paint.back()->setZValue(30);
+        ball_paint.back()->setOpacity(0.1);
     }
 
 }
