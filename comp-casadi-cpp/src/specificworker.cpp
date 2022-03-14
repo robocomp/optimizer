@@ -114,7 +114,7 @@ void SpecificWorker::compute()
            try
            {
                // move the robot
-               //move_robot(advance * gaussian(rotation), rotation);
+               move_robot(advance * gaussian(rotation), rotation);
                qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
 
                // draw
@@ -138,16 +138,13 @@ void SpecificWorker::compute()
     }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &center, const RoboCompLaser::TLaserData &ldata)
+SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &center, const std::vector<Eigen::Vector2d> &lpoints)
 {
-    std::vector<Eigen::Vector2d> lpoints(ldata.size());
-    for(auto &&[i, l] : ldata | iter::enumerate)
-        lpoints[i] = Eigen::Vector2d(l.dist*sin(l.angle)/1000.0, l.dist*cos(l.angle)/1000.0);
-
     // if ball already big enough return
-    float initial_dist = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();}).norm();
-    if(initial_dist > 1)
-         return std::make_tuple(center, 1);
+    Eigen::Vector2d min_point = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+    double initial_dist = (center-min_point).norm();
+    if(initial_dist > 1.5)
+         return std::make_tuple(center, 1.5);
 
     // compute the distance to all laser points for center and center +- dx, center +- dy
     auto dx = Eigen::Vector2d(0.1, 0.0);
@@ -158,7 +155,8 @@ SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &ce
     auto min_dy_minus = std::ranges::min(lpoints, [c = center - dy](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
 
     // compute normalized gradient
-    auto grad = Eigen::Vector2d(min_dx_plus.norm() - min_dx_minus.norm(), min_dy_plus.norm() - min_dy_minus.norm()).normalized();
+    auto grad = Eigen::Vector2d((min_dx_plus-center+dx).norm() - (min_dx_minus-center-dx).norm(),
+                                (min_dy_plus-center+dy).norm() - (min_dy_minus-center-dy).norm()).normalized();
 
     // move  along gradient until ball touches laser perimeter
     auto ball_hits_the_wall = [lpoints](const Eigen::Vector2d &c, float r)
@@ -173,15 +171,15 @@ SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &ce
     auto new_center = center;
     double min_dist = 0;
     float step = initial_dist;
-    //while(not ball_hits_the_wall(new_center, step) and  min_dist < 1)
-    while(min_dist == initial_dist + step)
+    float current_dist = 0;
+    //while(not ball_hits_the_wall(new_center, step) and current_dist < 1.5)
+    while(current_dist == step + initial_dist)
     {
         new_center = new_center + (grad * step);
         step = step + 0.1;
-        min_dist = std::ranges::min(lpoints, [c = new_center](auto a, auto b){ return (a-c).norm() < (b-c).norm();}).norm();
+        min_point = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+        current_dist = (new_center-min_point).norm();
     }
-    std::cout << __FUNCTION__ << new_center*1000 << " " << step << " " << min_dist << std::endl;
-    qInfo() << __FUNCTION__ << "...............";
     return std::make_tuple(new_center, step-0.1);
 }
 std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>> SpecificWorker::minimize_balls(const Target &my_target,
@@ -194,12 +192,6 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
     auto opti_local = opti.copy();
     casadi::Slice all;
 
-    // Warm start
-    if (not previous_values_of_solution.empty())
-        for (auto i: iter::range(1, consts.num_steps))
-            opti_local.set_initial(state(casadi::Slice(), i), std::vector<double>{previous_values_of_solution[3 * i],
-                                                                                  previous_values_of_solution[3 * i + 1],
-                                                                                  previous_values_of_solution[3 * i + 2]});
     // target in robot RS
     auto target_robot = from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2));
 
@@ -218,6 +210,9 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
     }
 
     // set initial state from guess or previous iteration
+    std::vector<Eigen::Vector2d> lpoints(ldata.size());
+    for(auto &&[i, l] : ldata | iter::enumerate)
+        lpoints[i] = Eigen::Vector2d(l.dist*sin(l.angle)/1000.0, l.dist*cos(l.angle)/1000.0);
     Balls balls;
     balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25});  // first point on robot
     for (auto i: iter::range(1, consts.num_steps))
@@ -225,9 +220,12 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
         opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
                                                                   previous_values_of_solution[3 * i + 1],
                                                                   previous_values_of_solution[3 * i + 2]});
-        // compute ball from i step from and initial x,y centered ball
         auto ball = compute_free_ball(Eigen::Vector2d(previous_values_of_solution[3*i],
-                                                      previous_values_of_solution[3*i+1]), ldata);
+                                                      previous_values_of_solution[3*i+1]), lpoints);
+        auto &[center, radius] = ball;
+        // std::cout << __FUNCTION__ << center << " " << radius << std::endl;
+        opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - e2v(center)) < (radius*radius) );
+
         balls.push_back(ball);
     }
 
@@ -250,8 +248,6 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
                          0.1 * casadi::MX::sumsqr(rot) +
                          0.01 * sum_dist_local);
 //                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
-
-    // obstacles
 
     // solve NLP ------
     try
@@ -312,16 +308,16 @@ std::optional<std::tuple<double, double, casadi::OptiSol>> SpecificWorker::minim
                                                                   previous_values_of_solution[3 * i + 2]});
 
     // Constraints: Free regions. Select a convex region for each step
-//    for (auto i : iter::range(2, consts.num_steps))
-//    {
-//        for(auto &[line, poly] : obstacles)
-//            if( poly.containsPoint(QPointF(previous_values_of_solution[3 * i], previous_values_of_solution[3 * i + 1]), Qt::OddEvenFill))
-//            {
-//                for(auto &[A,B,C] : line)
-//                    opti_local.subject_to((pos(0, i)*A + pos(1, i)*B + C) > consts.min_line_dist);
-//                break;
-//            }
-//    }
+    for (auto i : iter::range(2, consts.num_steps))
+    {
+        for(auto &[line, poly] : obstacles)
+            if( poly.containsPoint(QPointF(previous_values_of_solution[3 * i], previous_values_of_solution[3 * i + 1]), Qt::OddEvenFill))
+            {
+                for(auto &[A,B,C] : line)
+                    opti_local.subject_to((pos(0, i)*A + pos(1, i)*B + C) > consts.min_line_dist);
+                break;
+            }
+    }
 
     // initial values for state ---
     //auto target_angle_param = opti_local.parameter(1);

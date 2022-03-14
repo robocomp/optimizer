@@ -144,7 +144,7 @@ private:
     optional<tuple<double, double, casadi::OptiSol, Balls>>
     minimize_balls(const Target &my_target, const QPolygonF &poly_laser_robot, const vector<Gaussian> &laser_gaussians,
                    const Eigen::Vector3d &current_pose_meters, const RoboCompLaser::TLaserData &ldata);
-    Ball compute_free_ball(const Eigen::Vector2d &center, const RoboCompLaser::TLaserData &ldata);
+    Ball compute_free_ball(const Eigen::Vector2d &center, const std::vector<Eigen::Vector2d> &lpoints);
 
     //robot
     const int ROBOT_LENGTH = 400;
