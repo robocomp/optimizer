@@ -143,20 +143,23 @@ SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &ce
     // if ball already big enough return
     Eigen::Vector2d min_point = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
     double initial_dist = (center-min_point).norm();
-    if(initial_dist > 1.5)
-         return std::make_tuple(center, 1.5);
+    //std::cout << __FUNCTION__ << center << " " << initial_dist << std::endl;
+    if(initial_dist > 1)
+         return std::make_tuple(center, 1, Eigen::Vector2d());
 
     // compute the distance to all laser points for center and center +- dx, center +- dy
-    auto dx = Eigen::Vector2d(0.1, 0.0);
-    auto dy = Eigen::Vector2d(0.0, 0.1);
-    auto min_dx_plus = std::ranges::min(lpoints, [c = center + dx](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
-    auto min_dx_minus = std::ranges::min(lpoints, [c = center - dx](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
-    auto min_dy_plus = std::ranges::min(lpoints, [c = center + dy](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
-    auto min_dy_minus = std::ranges::min(lpoints, [c = center - dy](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+    auto grad = [lpoints ](const Eigen::Vector2d &center) {
+        auto dx = Eigen::Vector2d(0.1, 0.0);
+        auto dy = Eigen::Vector2d(0.0, 0.1);
+        auto min_dx_plus = std::ranges::min(lpoints, [c = center + dx](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+        auto min_dx_minus = std::ranges::min(lpoints, [c = center - dx](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+        auto min_dy_plus = std::ranges::min(lpoints, [c = center + dy](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+        auto min_dy_minus = std::ranges::min(lpoints, [c = center - dy](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+        // compute normalized gradient
+        return Eigen::Vector2d((min_dx_plus - (center + dx)).norm() - (min_dx_minus - (center - dx)).norm(),
+                               (min_dy_plus - (center + dy)).norm() - (min_dy_minus - (center - dy)).norm()).normalized();
+    };
 
-    // compute normalized gradient
-    auto grad = Eigen::Vector2d((min_dx_plus-center+dx).norm() - (min_dx_minus-center-dx).norm(),
-                                (min_dy_plus-center+dy).norm() - (min_dy_minus-center-dy).norm()).normalized();
 
     // move  along gradient until ball touches laser perimeter
     auto ball_hits_the_wall = [lpoints](const Eigen::Vector2d &c, float r)
@@ -169,18 +172,20 @@ SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &ce
         };
 
     auto new_center = center;
-    double min_dist = 0;
-    float step = initial_dist;
-    float current_dist = 0;
-    //while(not ball_hits_the_wall(new_center, step) and current_dist < 1.5)
-    while(current_dist == step + initial_dist)
+    float step = 0;
+    float current_dist = initial_dist;
+    //while(not ball_hits_the_wall(new_center, step) and current_dist < 1)
+    qInfo() << __FUNCTION__ << " OUT " << fabs(current_dist - (step + initial_dist));
+    while(fabs(current_dist - (step + initial_dist)) < 0.1)
     {
-        new_center = new_center + (grad * step);
-        step = step + 0.1;
-        min_point = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+        step = step + 0.01;
+        new_center = new_center + (grad(new_center) * step);
+        min_point = std::ranges::min(lpoints, [c=new_center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
         current_dist = (new_center-min_point).norm();
+        qInfo() << __FUNCTION__ << " IN " << fabs(current_dist - (step + initial_dist));
     }
-    return std::make_tuple(new_center, step-0.1);
+    qInfo() << __FUNCTION__ << "---------------------";
+    return std::make_tuple(new_center, current_dist, grad(new_center));
 }
 std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>> SpecificWorker::minimize_balls(const Target &my_target,
                                                                                     const QPolygonF &poly_laser_robot,
@@ -210,22 +215,25 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
     }
 
     // set initial state from guess or previous iteration
+    static std::vector<double> mu_vector(consts.num_steps, 1);
+    std::vector<double> slack_init(consts.num_steps, 0.2);
+    opti.set_initial(slack_vector, slack_init);
+
     std::vector<Eigen::Vector2d> lpoints(ldata.size());
     for(auto &&[i, l] : ldata | iter::enumerate)
         lpoints[i] = Eigen::Vector2d(l.dist*sin(l.angle)/1000.0, l.dist*cos(l.angle)/1000.0);
     Balls balls;
-    balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25});  // first point on robot
-    for (auto i: iter::range(1, consts.num_steps))
+    balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25, Eigen::Vector2d(0.2, 0.3)});  // first point on robot
+    for (auto i: iter::range(0, consts.num_steps))
     {
         opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
                                                                   previous_values_of_solution[3 * i + 1],
                                                                   previous_values_of_solution[3 * i + 2]});
         auto ball = compute_free_ball(Eigen::Vector2d(previous_values_of_solution[3*i],
                                                       previous_values_of_solution[3*i+1]), lpoints);
-        auto &[center, radius] = ball;
-        // std::cout << __FUNCTION__ << center << " " << radius << std::endl;
-        opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - e2v(center)) < (radius*radius) );
-
+        auto &[center, radius, grad] = ball;
+        opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - e2v(center)) <
+                                                ((radius-0.1)*(radius-0.1)) /*+ slack_vector(i)*/);
         balls.push_back(ball);
     }
 
@@ -233,21 +241,23 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
     auto sum_dist_target = opti_local.parameter();
     opti_local.set_value(sum_dist_target, 0.0);
     auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
-    for (auto k: iter::range(2, consts.num_steps +1))
+    for (auto k: iter::range(0, consts.num_steps))
         sum_dist_target += casadi::MX::sumsqr(pos(all, k) - t);
 
     // promote equal distances
     auto sum_dist_local = opti_local.parameter();
     opti_local.set_value(sum_dist_local, 0.0);
-    for (auto k: iter::range(2, consts.num_steps +1))
+    for (auto k: iter::range(0, consts.num_steps+1))
         sum_dist_local += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
+
 
 //    for (auto k: iter::range(2, consts.num_steps))
 //        sum_dist_target += casadi::MX::sumsqr(pos(all, k-1) - pos(all, k));
-    opti_local.minimize( sum_dist_target +                 /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
-                         0.1 * casadi::MX::sumsqr(rot) +
-                         0.01 * sum_dist_local);
-//                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
+    opti_local.minimize( /*sum_dist_target +  */               /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+                         /*0.01 * casadi::MX::sumsqr(rot) +*/
+                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
+                         0.0001 * sum_dist_local );
+                         //casadi::MX::dot(slack_vector, mu_vector)*/);
 
     // solve NLP ------
     try
@@ -537,9 +547,13 @@ casadi::Opti SpecificWorker::initialize_differential(const int N)
     //opti.subject_to(adv >= 0);
 
     // initial point constraints ------
-    auto initial_oparam = opti.parameter(3);
-    opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
-    opti.subject_to(state(all, 0) == initial_oparam);
+//    auto initial_oparam = opti.parameter(3);
+//    opti.set_value(initial_oparam, std::vector<double>{0.0, 0.0, 0.0});
+    opti.subject_to(state(all, 0) == std::vector<double>{0.0, 0.0, 0.0});
+
+    // slack vector declaration
+    slack_vector = opti.variable(consts.num_steps);
+
     return opti;
 }
 std::vector<SpecificWorker::Gaussian>
@@ -922,7 +936,7 @@ void SpecificWorker::draw_laser(const QPolygonF &poly_world) // robot coordinate
 }
 void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vector2d &tr_world, double my_rot, const Balls &balls)
 {
-    static std::vector<QGraphicsEllipseItem *> path_paint, ball_paint;
+    static std::vector<QGraphicsItem *> path_paint, ball_paint, ball_grads, ball_centers;
     static QString path_color = "Orange";
     static QString ball_color = "LightBlue";
 
@@ -932,8 +946,14 @@ void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vec
     for(auto p : ball_paint)
         viewer_robot->scene.removeItem(p);
     ball_paint.clear();
+    for(auto p : ball_grads)
+        viewer_robot->scene.removeItem(p);
+    ball_grads.clear();
+    for(auto p : ball_centers)
+        viewer_robot->scene.removeItem(p);
+    ball_centers.clear();
 
-    uint s = 200;
+    uint s = 100;
     std::vector<Eigen::Vector2d> qpath(path.size()/2);
     for(auto &&[i, p] : iter::chunked(path, 2) | iter::enumerate)
     {
@@ -941,13 +961,22 @@ void SpecificWorker::draw_path(const std::vector<double> &path, const Eigen::Vec
         path_paint.push_back(viewer_robot->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
         path_paint.back()->setZValue(30);
     }
-    for(auto &[center, r] : balls)
+    for(auto &[center, r, grad] : balls)
     {
         auto bc = from_robot_to_world(center*1000, tr_world, my_rot);
-        auto nr = r *1000;
-        ball_paint.push_back(viewer_robot->scene.addEllipse(bc.x()-nr/2, bc.y()-nr/2, nr , nr, QPen(QBrush("DarkBlue"),20), QBrush(QColor(ball_color))));
-        ball_paint.back()->setZValue(30);
+        auto nr = r * 1000;
+        ball_paint.push_back(viewer_robot->scene.addEllipse(bc.x()-nr, bc.y()-nr, nr*2 , nr*2, QPen(QBrush("DarkBlue"),20), QBrush(QColor(ball_color))));
+        ball_paint.back()->setZValue(15);
         ball_paint.back()->setOpacity(0.1);
+
+        // grads
+        auto p2 = from_robot_to_world(center*1000 + grad*100, tr_world, my_rot);
+        ball_grads.push_back(viewer_robot->scene.addLine(bc.x(), bc.y(), p2.x(), p2.y(), QPen(QBrush("Magenta"), 20)));
+        ball_grads.back()->setZValue(30);
+
+        // centers
+        ball_centers.push_back(viewer_robot->scene.addEllipse(bc.x()-20, bc.y()-20, 40, 40, QPen(QColor("Magenta")), QBrush(QColor("Magenta"))));
+        ball_centers.back()->setZValue(30);
     }
 
 }

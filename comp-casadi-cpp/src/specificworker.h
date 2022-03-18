@@ -75,7 +75,7 @@ private:
     };
     Constants consts;
     bool startup_check_flag;
-    using Ball = std::tuple<Eigen::Vector2d, float>;
+    using Ball = std::tuple<Eigen::Vector2d, float, Eigen::Vector2d>;
     using Balls = std::vector<Ball>;
 
     //robot
@@ -129,6 +129,7 @@ private:
     casadi::MX control;
     casadi::MX adv;
     casadi::MX rot;
+    casadi::MX slack_vector;
     std::vector<Eigen::Vector2d> convex_polygon;
     std::optional<std::tuple<double, double, casadi::OptiSol>> minimize(const Target &my_target,
                                                                         const QPolygonF &poly_laser_robot,
