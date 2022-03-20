@@ -100,7 +100,7 @@ private:
     // target
     struct Target
     {
-        bool active = true;
+        bool active = false;
         QPointF pos; //mm
         Eigen::Vector2d to_eigen() const
         { return Eigen::Vector2d(pos.x(), pos.y()); }
