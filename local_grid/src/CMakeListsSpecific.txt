@@ -1,0 +1,22 @@
+# Sources set
+SET ( SOURCES
+  specificworker.cpp
+  specificmonitor.cpp
+  #$ENV{ROBOCOMP}/classes/grid2d/grid.cpp
+  /home/robocomp/robocomp/classes/grid2d/grid.cpp
+  $ENV{ROBOCOMP}/classes/abstract_graphic_viewer/abstract_graphic_viewer.h
+)
+
+# Headers set
+SET ( HEADERS
+  specificworker.h
+  specificmonitor.h
+)
+
+find_package(casadi)
+INCLUDE( $ENV{ROBOCOMP}/cmake/modules/opencv4.cmake )
+add_definitions(-g -march=native  -fmax-errors=5 )
+
+SET (LIBS ${LIBS} tbb  casadi  )
+
+

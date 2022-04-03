@@ -20,8 +20,7 @@
 #include <cppitertools/enumerate.hpp>
 #include <cppitertools/range.hpp>
 #include <cppitertools/sliding_window.hpp>
-#include <cppitertools/filter.hpp>
-
+#include <cppitertools/slice.hpp>
 
 /**
 * \brief Default constructor
@@ -61,7 +60,8 @@ void SpecificWorker::initialize(int period)
                     qInfo() << __FUNCTION__ << " Received new target at " << t;
                     target.pos = t;
                     target.active = true;
-                    target.draw = viewer_robot->scene.addEllipse(t.x()-50, t.y()-50, 100, 100, QPen(QColor("magenta")), QBrush(QColor("magenta")));
+                    if(target.draw != nullptr) viewer_robot->scene.removeItem(target.draw);
+                    target.draw = viewer_robot->scene.addEllipse(t.x()-100, t.y()-100, 200, 200, QPen(QColor("magenta")), QBrush(QColor("magenta")));
                 });
 
         // left and right expanded semi-polygons to detect collisions. They have to be transformed into the laser ref. system
@@ -128,7 +128,7 @@ void SpecificWorker::compute()
     {
         target_in_robot = from_world_to_robot(target.to_eigen(), r_state);
         auto dist = target_in_robot.norm();
-        if( dist > constants.final_distance_to_target)
+        if( dist > constants.final_distance_to_target)      // target not reached
         {
             // compute the closest point to target inside laser as a provisional target
             Target s_target = sub_target(target, l_poly, ldata );
@@ -151,7 +151,7 @@ void SpecificWorker::compute()
             lateral_bumpers(rot, lhit, rhit);   // check lateral collisions
             adv = adv * gaussian(rot);          // slow down if rotating
             move_robot(adv, rot);
-            qInfo() << __FUNCTION__ << adv << rot;
+            //qInfo() << __FUNCTION__ << adv << rot;
             //stuck = do_if_stuck(adv_n, rot, r_state, lhit, rhit);
             draw_timeseries(rot*5, adv/100, (int)lhit*5, (int)rhit*5, (int)stuck*5);
         }
@@ -182,25 +182,24 @@ SpecificWorker::Target SpecificWorker::sub_target(const Target &target, const QP
     for (const auto &&[k, l]: iter::sliding_window(ldata, 2) | iter::enumerate)
         derivatives[k + 1] = l[1].dist - l[0].dist;
 
+    // locate peaks
     std::vector<Eigen::Vector2f> peaks;
     for (const auto &&[k, der]: iter::enumerate(derivatives))
-    {
-        RoboCompLaser::TData l;
-        if (der > 500)
+        if (fabs(der) > constants.peak_threshold)
         {
+            RoboCompLaser::TData l;
             l = ldata.at(k - 1);
-            peaks.push_back(Eigen::Vector2f(l.dist * sin(l.angle), l.dist * cos(l.angle)));
-        }
-        else if (der < -500)
-        {
+            auto one = Eigen::Vector2f(l.dist * sin(l.angle), l.dist * cos(l.angle));
             l = ldata.at(k);
-            peaks.push_back(Eigen::Vector2f(l.dist * sin(l.angle), l.dist * cos(l.angle)));
+            auto two = Eigen::Vector2f(l.dist * sin(l.angle), l.dist * cos(l.angle));
+            peaks.push_back((one + two) / 2.f);
         }
-    }
-    // select closest opening to robot
+
+    // if no peaks return
     if(peaks.empty())
         return target;
 
+    // select closest opening to robot
     auto min = std::ranges::min_element(peaks, [target_in_robot](auto a, auto b){ return (target_in_robot-a).norm() < (target_in_robot-b).norm();});
     auto candidate = *min;
 
@@ -211,13 +210,39 @@ SpecificWorker::Target SpecificWorker::sub_target(const Target &target, const QP
     // if target closer that subtatget ignore
     if(target_in_robot.norm() < candidate.norm())
         return target;
-    
+
+    // return target
     Target t;
     t.active = true;
     auto pos = from_robot_to_world(*min, Eigen::Vector3f(r_state_global.x, r_state_global.y, r_state_global.rz));
     t.pos = QPointF(pos.x(), pos.y());
     former_draw = viewer_robot->scene.addRect(t.pos.x()-100, t.pos.y()-100, 200, 200, QPen(QColor("blue")), QBrush(QColor("blue")));
+
+    //draw bezier
+    bezier(std::vector<QPointF>{QPointF{r_state_global.x, r_state_global.y}, t.pos, target.pos});
     return t;
+}
+// Downloaded from https://github.com/oysteinmyrmo/bezier
+Eigen::Vector2f SpecificWorker::bezier(const std::vector<QPointF> &path)
+{
+    static QGraphicsItem *bez_draw = nullptr;
+    if(bez_draw != nullptr) viewer_robot->scene.removeItem(bez_draw);
+
+    //std::vector<Bezier::Vec2> points;
+    if(path.size() == 3)
+    {
+        QPainterPath bez(path[0]);
+        bez.cubicTo(path[1], path[1], path[2]);
+        bez_draw = viewer_robot->scene.addPath(bez, QPen(Qt::green, 50));
+
+//        for (auto &&p: iter::slice(path, 0, 3, 1))
+//            points.emplace_back(Bezier::Vec2(p.x(), p.y()));
+//        qInfo() << __FUNCTION__ << points.size();
+//        Bezier::Bezier<3> curve(points);
+//        for(auto &&i : iter::range(0.0, 1.0, 0.1))
+//            curve.valueAt(i);
+    }
+    return Eigen::Vector2f();
 }
 // lateral bumpers
 void SpecificWorker::lateral_bumpers(float &rot, bool &lhit, bool &rhit)
@@ -232,6 +257,7 @@ void SpecificWorker::lateral_bumpers(float &rot, bool &lhit, bool &rhit)
         rot += delta_rot;
         delta_rot *= 2;
         lhit = true;
+        // draw semi polygon
     }
     else
     {
@@ -269,7 +295,7 @@ bool SpecificWorker::do_if_stuck(float adv, float rot, const RoboCompFullPoseEst
         if(lhit) move_robot(-constants.backward_speed, -dist(mt));
         else if(rhit) move_robot(-constants.backward_speed, dist(mt));
         else move_robot(-constants.backward_speed, 0);
-        usleep(300000);
+        usleep(constants.backing_time_ms * 1000);
         qInfo() << __FUNCTION__ << "------ STUCK ----------";
         return true;
     }
@@ -598,7 +624,7 @@ int SpecificWorker::startup_check()
 	return 0;
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////// SERVANT //////////////////////////////////////////////////////////
 RoboCompMoveTowards::Command SpecificWorker::MoveTowards_move(float x, float y, float alpha)
 {
     qInfo() << __FUNCTION__ ;

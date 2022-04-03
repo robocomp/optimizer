@@ -100,25 +100,17 @@ void SpecificWorker::compute()
     //auto obstacles = compute_laser_partitions(laser_poly_robot);
     //draw_partitions(obstacles, QColor("blue"));
 
-    // process target candidate.
-    // If inside LIDAR polygon then OK;
-    // if outside propose an inside subtarget;
-    //     search for openings in lidar-polygon and select a near one as the next subtarget
-
     // check current target distance
     // double dist_to_target = (current_pose_meters(Eigen::seq(Eigen::fix<0>, Eigen::fix<1>))) - target.to_eigen_meters()).norm(); VERSION 3.4
     double dist_to_target = (Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()) - target.to_eigen_meters()).norm();
-    static float adv_r=0, rot_r=0;
     if( target.is_active() and dist_to_target > consts.min_dist_to_target)
     {
-        Target s_target = sub_target(target, laser_poly_robot, ldata, Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
-        //Target s_target = target;
+        //Target s_target = sub_target(target, laser_poly_robot, ldata, Eigen::Vector2d(current_pose.x, current_pose.z), current_pose.alpha);
+        Target s_target = target;
         if (auto r = minimize_balls(s_target, current_pose_meters, ldata); r.has_value())
         {
             robot_polygon->setBrush(QColor("Blue"));
             auto [advance, rotation, solution, balls] = r.value();
-            adv_r = advance;
-            rot_r = rotation;
             try
             {
                 // move the robot
@@ -131,7 +123,8 @@ void SpecificWorker::compute()
             }
             catch (...)
             { std::cout << "No solution found" << std::endl; }
-        } else // do something to avoid go blind
+        }
+        else // do something to avoid go blind
         {
             move_robot(0, 0);
             robot_polygon->setBrush(QColor("red"));
@@ -151,7 +144,7 @@ SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &ce
 {
     // if ball already big enough return
     Eigen::Vector2d min_point = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
-    double initial_dist = (center-min_point).norm();
+    double initial_dist = (center-min_point).norm() - (consts.robot_radius/1000.f);
     //std::cout << __FUNCTION__ << center << " " << initial_dist << std::endl;
     if(initial_dist > consts.max_ball_radius)
          return std::make_tuple(center, 1, Eigen::Vector2d());
@@ -179,7 +172,7 @@ SpecificWorker::Ball SpecificWorker::compute_free_ball(const Eigen::Vector2d &ce
         step = step + 0.05;
         new_center = new_center + (grad(new_center) * step);
         min_point = std::ranges::min(lpoints, [c=new_center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
-        current_dist = (new_center-min_point).norm();
+        current_dist = (new_center-min_point).norm() - (consts.robot_radius/1000.f);
     }
 
     // if redius les than robot_radius DO SOMETHING
@@ -214,7 +207,7 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
     }
 
     // initialize slack variables
-    static std::vector<double> mu_vector(consts.num_steps, 3);
+    static std::vector<double> mu_vector(consts.num_steps, 1);
     std::vector<double> slack_init(consts.num_steps, 0.1);
     opti.set_initial(slack_vector, slack_init);
 
@@ -234,13 +227,13 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
 
         auto &[center, radius, grad] = ball;
         double r = consts.robot_radius/1000.f;
-        opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - e2v(center) + r) < ((radius-0.05)*(radius-0.05)) + slack_vector(i));
+        opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - e2v(center) + r) < (radius-0.01) + slack_vector(i));
         balls.push_back(ball);
     }
 
     //qInfo() << "Huma speed: " << target.get_velocity();
     // cost function
-    double alfa = 1.1;
+    double alfa = 1;
     auto sum_dist_target = opti_local.parameter();
     opti_local.set_value(sum_dist_target, 0.0);
     auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
@@ -261,12 +254,12 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
         sum_dist_local += pow(beta,k) * casadi::MX::sumsqr(state(all, k-1) - state(all, k));
 
     // J
-    opti_local.minimize( 0.9 * sum_dist_target +              /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
+    opti_local.minimize( 1.0 * sum_dist_target +              /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
                          /*0.01 * casadi::MX::sumsqr(rot) +*/
                          /*pow(1, consts.num_steps)**/casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
                          /*0.6 * sum_dist_local +*/
-                         casadi::MX::dot(slack_vector, mu_vector)
-                         /*sum_accel*/);
+                        casadi::MX::dot(slack_vector, mu_vector)
+                        /*sum_accel*/);
 
     // solve NLP ------
     try
@@ -703,10 +696,10 @@ SpecificWorker::Target SpecificWorker::sub_target( const Target &target,
             auto one = Eigen::Vector2d(l.dist * sin(l.angle), l.dist * cos(l.angle));
             l = ldata.at(k);
             auto two = Eigen::Vector2d(l.dist * sin(l.angle), l.dist * cos(l.angle));
-            //peaks.push_back((one + two) / 2.f);
-            Eigen::Vector2d m;
-            if(one.norm() < two.norm()) m = one; else m = two;
-            peaks.push_back(m);
+            peaks.push_back((one + two) / 2.f);
+//            Eigen::Vector2d m;
+//            if(one.norm() < two.norm()) m = one; else m = two;
+//            peaks.push_back(m);
         }
 
     // if no peaks return

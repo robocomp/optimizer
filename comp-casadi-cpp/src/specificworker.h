@@ -40,7 +40,7 @@
 //#include <template_utilities/template_utilities.h>
 #include <Eigen/Eigenvalues>
 //#include <unsupported/Eigen/Splines>
-
+#include <grid2d/grid.h>
 
 
 class SpecificWorker : public GenericWorker
@@ -63,12 +63,12 @@ private:
     struct Constants
     {
         int num_steps = 10;                     // MPC steps ahead
-        const float robot_radius = 250;
+        const float robot_radius = 300;
         double gauss_dist = 0.1;                // minimun distance to a lidar-gaussian as constraint
         double point_dist = 0.2;                // value in lidar-gaussian at lidar points (corners)
         double point_sigma = 0.07;              // variance for point (corners) gaussians
         double gauss_value_for_point = 0.3;     // minimun distance to a corner gaussian as constraint
-        float min_dist_to_target = 0.1;         // min distance to target at which the robot stops
+        float min_dist_to_target = 0.9;         // min distance to target at which the robot stops
         double max_rotation_value = 0.5;        // max rotation constraint in rads/sg
         double max_advance_value = 0.9;           // max advance constraint in m/sg
         double min_advance_value = 0;           // min advance constraint in m/sg
@@ -127,7 +127,6 @@ private:
             QGraphicsEllipseItem *draw = nullptr;
     };
     Target target;
-    std::vector<double> previous_values_of_solution, previous_control_of_solution;
 
     // convex parrtitions
     using Point = std::pair<float, float>;  //only for RDP, change to QPointF
@@ -140,6 +139,7 @@ private:
     void draw_partitions(const Obstacles &obstacles, const QColor &color, bool print=false);
 
     // casadi
+    std::vector<double> previous_values_of_solution, previous_control_of_solution;
     casadi::Opti opti;
     casadi::MX state;
     casadi::MX pos;
@@ -187,6 +187,8 @@ private:
                        const Eigen::Vector2d &robot_tr_mm,
                        double robot_ang);
 
+    // Grid
+    Grid grid;
 
 };
 #endif

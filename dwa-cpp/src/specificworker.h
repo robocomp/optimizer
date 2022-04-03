@@ -29,8 +29,8 @@
 #include <optional>
 #include <Eigen/Dense>
 #include <qcustomplot/qcustomplot.h>
-//#include "dynamic_window.h"
 #include <abstract_graphic_viewer/abstract_graphic_viewer.h>
+#include "/home/robocomp/software/bezier/include/bezier.h"
 
 class SpecificWorker : public GenericWorker
 {
@@ -68,6 +68,8 @@ public slots:
             const float A_dist_factor = 1;                  // weight for distance to target factor in optimun selection
             const float B_turn_factor = 10;                 // weight for previous turn factor in optimun selection
             const float C_advance_factor = 3;
+            const float peak_threshold = 500;
+            const float backing_time_ms = 500;
         };
         Constants constants;
 
@@ -93,6 +95,8 @@ public slots:
         QPolygonF laser_poly, left_polygon_robot, right_polygon_robot, polygon_robot;
         void move_robot(float adv, float rot);
         float gaussian(float x);
+        inline Eigen::Vector2f q2e(const QPointF &p) const {return Eigen::Vector2f(p.x(), p.y());};
+        inline QPointF e2q(const Eigen::Vector2f &p) const {return QPointF(p.x(), p.y());};
 
         // target
         struct Target
@@ -126,7 +130,7 @@ public slots:
         void draw_timeseries(float rot, float adv, int lhit, int rhit, int stuck);
         void lateral_bumpers(float &rot, bool &lhit, bool &rhit);
         Target sub_target(const Target &target, const QPolygonF &poly, const RoboCompLaser::TLaserData &ldata);
-
+        Eigen::Vector2f bezier(const vector<QPointF> &path);
 };
 
 #endif
