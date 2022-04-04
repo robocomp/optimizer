@@ -33,6 +33,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include "/home/robocomp/robocomp/classes/grid2d/grid.h"
+#include "mpc.h"
 
 
 class SpecificWorker : public GenericWorker
@@ -55,6 +56,7 @@ class SpecificWorker : public GenericWorker
 
         struct Constants
         {
+            uint num_steps_mpc = 10;
             const float max_advance_speed = 800;
             float tile_size = 100;
             const float max_laser_range = 4000;
@@ -64,6 +66,10 @@ class SpecificWorker : public GenericWorker
             const float robot_semi_length = robot_length/2.0;
             const float final_distance_to_target = 150; //mm
             const float min_dist_to_target = 100; //mm
+            float lidar_noise_sigma  = 15;
+            const int num_lidar_affected_rays_by_hard_noise = 1;
+            double xset_gaussian = 0.5;             // gaussian break x set value
+            double yset_gaussian = 0.6;             // gaussian break y set value
         };
         Constants constants;
 
@@ -73,6 +79,7 @@ class SpecificWorker : public GenericWorker
             float ang;
             Eigen::Vector2f pos;
             QPointF toQpointF() const { return QPointF(pos.x(), pos.y());};
+            Eigen::Vector3d to_vec3_meters() const { return Eigen::Vector3d(pos.x()/1000.0, pos.y()/1000.0, ang);};
         };
         const int ROBOT_LENGTH = 400;
         QGraphicsPolygonItem *robot_polygon;
@@ -89,16 +96,18 @@ class SpecificWorker : public GenericWorker
         inline Eigen::Vector2f q2e(const QPointF &p) const {return Eigen::Vector2f(p.x(), p.y());};
         Pose2D robot_pose;
         Pose2D read_robot();
-        void goto_target(const std::vector<Eigen::Vector2f> &path);
+        void goto_target_carrot(const std::vector<Eigen::Vector2f> &path_robot);
+        void goto_target_mpc(const std::vector<Eigen::Vector2d> &path_robot, const RoboCompLaser::TLaserData &ldata);
+        void move_robot(float adv, float rot, float side=0);
 
-        // grid
+    // grid
         QRectF dimensions;
         Grid grid;
         Pose2D grid_world_pose;
         void update_map(const RoboCompLaser::TLaserData &ldata);
 
         // laser
-        void read_laser();
+        RoboCompLaser::TLaserData read_laser(bool noise=false);
         void draw_laser(const RoboCompLaser::TLaserData &ldata);
 
         // camera
@@ -111,7 +120,7 @@ class SpecificWorker : public GenericWorker
             QPointF pos;
             QGraphicsEllipseItem *draw = nullptr;
             Eigen::Vector2f to_eigen() const {return Eigen::Vector2f(pos.x(), pos.y());}
-            Eigen::Vector3f to_eigen_3() const {return Eigen::Vector3f(pos.x(), pos.y(), 1.f);}
+            Eigen::Vector3f to_eigen_3() const {return Eigen::Vector3f(pos.x()/1000.f, pos.y()/1000.f, 1.f);}
         };
         Target target;
         template <typename Func, typename Obj>
@@ -119,8 +128,13 @@ class SpecificWorker : public GenericWorker
         { return [=](auto&&... args) { return (obj->*f)(std::forward<decltype(args)>(args)...); };}
 
         // path
-        void draw_path(const list<QPointF> &path);
+        void draw_path(const std::vector<Eigen::Vector2f> &path_in_robot);
 
+        // mpc
+        mpc::MPC mpc;
+
+        float gaussian(float x);
+        void draw_solution_path(const vector<double> &path,  const mpc::MPC::Balls &balls);
 };
 
 #endif

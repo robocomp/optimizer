@@ -2,7 +2,7 @@
 // Created by pbustos on 3/04/22.
 //
 
-#include "MPC.h"
+#include "mpc.h"
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
 
@@ -10,8 +10,9 @@ namespace mpc
 {
     casadi::Opti MPC::initialize_differential(const int N)
     {
+        consts.num_steps = N;
         casadi::Slice all;
-        auto opti = casadi::Opti();
+        this->opti = casadi::Opti();
         auto specific_options = casadi::Dict();
         auto generic_options = casadi::Dict();
         //specific_options["accept_after_max_steps"] = 100;
@@ -68,18 +69,18 @@ namespace mpc
         slack_vector = opti.variable(consts.num_steps);
 
         return opti;
-    }
+    };
 
-    std::optional<std::tuple<double, double, casadi::OptiSol, MPC::Balls>> MPC::minimize_balls(const Target &my_target,
-                                                                                               const Eigen::Vector3d &current_pose_meters,
-                                                                                               const RoboCompLaser::TLaserData &ldata)
+    MPC::Result MPC::minimize_balls_path(const std::vector<Eigen::Vector2d> &path,
+                                         const Eigen::Vector3d &current_pose_meters,
+                                         const RoboCompLaser::TLaserData &ldata)
     {
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        auto opti_local = opti.copy();
+        auto opti_local = this->opti.copy();
         casadi::Slice all;
 
         // target in robot RS
-        auto target_robot = from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2));
+        auto target_robot = path.at(consts.num_steps-1);
 
         // Warm start
         if (previous_values_of_solution.empty())
@@ -96,7 +97,7 @@ namespace mpc
         }
 
         // initialize slack variables
-        static std::vector<double> mu_vector(consts.num_steps, 1);
+        static std::vector<double> mu_vector(consts.num_steps, 0.2);
         std::vector<double> slack_init(consts.num_steps, 0.1);
         opti.set_initial(slack_vector, slack_init);
 
@@ -120,29 +121,37 @@ namespace mpc
             balls.push_back(ball);
         }
 
-        //qInfo() << "Huma speed: " << target.get_velocity();
         // cost function
-        double alfa = 1;
+        double alfa = 1.1;
         auto sum_dist_target = opti_local.parameter();
         opti_local.set_value(sum_dist_target, 0.0);
-        auto t = e2v(from_world_to_robot(my_target.to_eigen_meters(), Eigen::Vector2d(current_pose_meters.x(), current_pose_meters.y()), current_pose_meters(2)));
-        for (auto k: iter::range(0, consts.num_steps+1))
+        auto t = e2v(target_robot);
+        for (auto k: iter::range(consts.num_steps+1))
             sum_dist_target += pow(alfa,k) * casadi::MX::sumsqr(pos(all, k) - t);
-        
-        // minimize step size weighting more the furthest poses
-        double beta = 1.1;
-        auto sum_dist_local = opti_local.parameter();
-        opti_local.set_value(sum_dist_local, 0.0);
-        for (auto k: iter::range(2, consts.num_steps+1))
-            sum_dist_local += pow(beta,k) * casadi::MX::sumsqr(state(all, k-1) - state(all, k));
 
-        // J
-        opti_local.minimize( 1.0 * sum_dist_target +              /*casadi::MX::sumsqr(phi(-1)-target_angle_param)*10*/
-                             /*0.01 * casadi::MX::sumsqr(rot) +*/
-                             /*pow(1, consts.num_steps)**/casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
-                             /*0.6 * sum_dist_local +*/
-                             casadi::MX::dot(slack_vector, mu_vector)
-                /*sum_accel*/);
+//        // minimize step size weighting more the furthest poses
+//        double beta = 1.1;
+//        auto sum_dist_local = opti_local.parameter();
+//        opti_local.set_value(sum_dist_local, 0.0);
+//        for (auto k: iter::range(2, consts.num_steps+1))
+//            sum_dist_local += pow(beta,k) * casadi::MX::sumsqr(state(all, k-1) - state(all, k));
+
+        // minimze distance to each element of path
+        auto sum_dist_path = opti_local.parameter();
+        opti_local.set_value(sum_dist_path, 0.0);
+        for (auto k: iter::range(consts.num_steps))
+            sum_dist_path += casadi::MX::sumsqr(pos(all, k) - e2v(path[k]));
+
+        // minimze distance to each element of path
+        auto sum_rot = opti_local.parameter();
+        opti_local.set_value(sum_rot, 0.0);
+        for (auto k: iter::range(consts.num_steps))
+            sum_rot += casadi::MX::sumsqr(rot(k));
+
+        //  J
+        opti_local.minimize( sum_dist_path + 0.1*sum_dist_target + sum_rot +
+                             5*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
+                             0.1*casadi::MX::dot(slack_vector, mu_vector));
 
         // solve NLP ------
         try
@@ -152,7 +161,7 @@ namespace mpc
             if (retstat.compare("Solve_Succeeded") != 0)
             {
                 std::cout << "NOT succeeded" << std::endl;
-                move_robot(0, 0);  //slow down
+                //move_robot(0, 0);  //slow down
                 return {};
             }
             previous_values_of_solution = std::vector<double>(solution.value(state));
@@ -174,6 +183,48 @@ namespace mpc
             previous_values_of_solution.clear();
             previous_control_of_solution.clear();
             return {}; }
+    }
+
+    MPC::Ball MPC::compute_free_ball(const Eigen::Vector2d &center, const std::vector<Eigen::Vector2d> &lpoints)
+    {
+        // if ball already big enough return
+        Eigen::Vector2d min_point = std::ranges::min(lpoints, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+        double initial_dist = (center-min_point).norm() - (consts.robot_radius/1000.f);
+        //std::cout << __FUNCTION__ << center << " " << initial_dist << std::endl;
+        if(initial_dist > consts.max_ball_radius)
+            return std::make_tuple(center, 1, Eigen::Vector2d());
+
+        // compute the distance to all laser points for center and center +- dx, center +- dy
+        auto grad = [lpoints ](const Eigen::Vector2d &center) {
+            auto dx = Eigen::Vector2d(0.1, 0.0);
+            auto dy = Eigen::Vector2d(0.0, 0.1);
+            auto min_dx_plus = std::ranges::min(lpoints, [c = center + dx](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+            auto min_dx_minus = std::ranges::min(lpoints, [c = center - dx](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+            auto min_dy_plus = std::ranges::min(lpoints, [c = center + dy](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+            auto min_dy_minus = std::ranges::min(lpoints, [c = center - dy](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+            // compute normalized gradient
+            return Eigen::Vector2d((min_dx_plus - (center + dx)).norm() - (min_dx_minus - (center - dx)).norm(),
+                                   (min_dy_plus - (center + dy)).norm() - (min_dy_minus - (center - dy)).norm()).normalized();
+        };
+
+        // move  along gradient until the equality condition  max_dist(step*grad + c) == step + max_dist(c)  breaks
+        auto new_center = center;
+        float step = 0;
+        float current_dist = initial_dist;
+
+        while(fabs(current_dist - (step + initial_dist)) < 0.005)
+        {
+            step = step + 0.05;
+            new_center = new_center + (grad(new_center) * step);
+            min_point = std::ranges::min(lpoints, [c=new_center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+            current_dist = (new_center-min_point).norm() - (consts.robot_radius/1000.f);
+        }
+
+        // if redius les than robot_radius DO SOMETHING
+        //    if(current_dist < consts.robot_radius/1000.f)
+        //        return std::make_tuple(center, initial_dist, grad(center));
+
+        return std::make_tuple(new_center, current_dist, grad(new_center));
     }
 
     ////////////////////// AUX /////////////////////////////////////////////////

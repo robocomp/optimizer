@@ -19,6 +19,7 @@
 #include "specificworker.h"
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
+#include <cppitertools/chunked.hpp>
 
 
 /**
@@ -57,14 +58,11 @@ void SpecificWorker::initialize(int period)
     robot_polygon = rp;
     laser_in_robot_polygon = new QGraphicsRectItem(-10, 10, 20, 20, robot_polygon);
     laser_in_robot_polygon->setPos(0, 190);     // move this to abstract
-    try
-    {
-        RoboCompGenericBase::TBaseState bState;
-        differentialrobot_proxy->getBaseState(bState);
-        last_point = QPointF(bState.x, bState.z);
-    }
-    catch(const Ice::Exception &e) { std::cout << e.what() << std::endl;}
 
+    // MPC
+    mpc.initialize_differential(constants.num_steps_mpc);
+
+    // mouse clicking
     connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
 
     this->Period = period;
@@ -75,28 +73,77 @@ void SpecificWorker::initialize(int period)
 }
 void SpecificWorker::compute()
 {
-    read_laser();
+    auto ldata = read_laser(true);
     robot_pose = read_robot();
     //read_camera();
     if(target.active)
     {
-        auto lpath = grid.computePath(e2q(from_world_to_grid(robot_pose.pos)),
-                                                   e2q(from_world_to_grid(target.to_eigen())));
-        std::vector<Eigen::Vector2f> path;
+        auto path = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
+        if(path.empty() and from_world_to_robot(target.to_eigen()).norm() > 100)
+        {
+            move_robot(200, 0.5);
+            return;
+        }
         auto g2r = from_grid_to_robot_matrix();
-        path.resize(lpath.size());
-        for (auto &&[i, p]: lpath | iter::enumerate)
-            path[i] = (g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2);
-        draw_path(lpath);
-        goto_target(path);
+        std::vector<Eigen::Vector2d> path_robot_meters(path.size());
+        for (auto &&[i, p]: path | iter::enumerate)
+        {
+            p = (g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2);
+            path_robot_meters[i] = Eigen::Vector3d(p.x(), p.y(), 1.f).head(2)/1000.0;  // meters
+        }
+        draw_path(path);
+        //goto_target_carrot(path);
+        goto_target_mpc(path_robot_meters, ldata);
     }
     else
         qInfo() << __FUNCTION__ << "IDLE";
 }
 /////////////////////////////////////////////////////////////////////////
-
-void SpecificWorker::goto_target(const std::vector<Eigen::Vector2f> &path)  //path in robot RS
+void SpecificWorker::goto_target_mpc(const std::vector<Eigen::Vector2d> &path_robot, const RoboCompLaser::TLaserData &ldata)  //path in robot RS
 {
+    // lambda para unificar las dos salidas de los if
+    auto exit = [this]()
+    {
+        try
+        { differentialrobot_proxy->setSpeedBase(0, 0); }
+        catch (const Ice::Exception &e)
+        { std::cout << e.what() << std::endl; }
+        target.active = false;
+        qInfo() << __FUNCTION__ << "Target reached";
+    };
+
+    if(path_robot.size() < constants.num_steps_mpc)
+    {
+        exit();
+        return;
+    }
+
+    if(auto r = mpc.minimize_balls_path(path_robot, robot_pose.to_vec3_meters(), ldata); r.has_value())
+    {
+        auto [advance, rotation, solution, balls] = r.value();
+        try
+        {
+            // move the robot
+            move_robot(advance * gaussian(rotation), rotation);
+            qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;
+
+            // draw
+            auto path = std::vector<double>(solution.value(mpc.pos));  //in meters
+            draw_solution_path(path, balls);
+        }
+        catch (...)
+        { std::cout << "No solution found" << std::endl; }
+    }
+    else // do something to avoid go blind
+    {
+        move_robot(0, 0);
+        robot_polygon->setBrush(QColor("red"));
+    }
+}
+
+void SpecificWorker::goto_target_carrot(const std::vector<Eigen::Vector2f> &path_robot)  //path in robot RS
+{
+    // lambda para unificar las dos salidas de los if
     auto exit = [this]()
                 {
                     try
@@ -104,17 +151,16 @@ void SpecificWorker::goto_target(const std::vector<Eigen::Vector2f> &path)  //pa
                     catch (const Ice::Exception &e)
                     { std::cout << e.what() << std::endl; }
                     target.active = false;
-                    grid.clear();
                     qInfo() << __FUNCTION__ << "Target reached";
                 };
 
-    if (not path.empty())
+    if (not path_robot.empty())
     {
         Eigen::Vector2f target_r;
-        if(path.size() > 5)
-            target_r = path[5];
+        if(path_robot.size() > 5)
+            target_r = path_robot[5];
         else
-            target_r = path.back();
+            target_r = path_robot.back();
         float dist = target_r.norm();
         if(dist > constants.min_dist_to_target)
         {
@@ -130,18 +176,42 @@ void SpecificWorker::goto_target(const std::vector<Eigen::Vector2f> &path)  //pa
         else exit();
     }
     else
+    {
         exit();
+        return;
+    }
 }
-void SpecificWorker::read_laser()
+RoboCompLaser::TLaserData SpecificWorker::read_laser(bool noise)
 {
+    static std::random_device rd;
+    static std::mt19937 mt(rd());
+    static std::normal_distribution<double> normal_dist(0.0, constants.lidar_noise_sigma);
+    RoboCompLaser::TLaserData ldata;
     try
     {
-        auto ldata = laser_proxy->getLaserData();
+        ldata = laser_proxy->getLaserData();
+
+        // add radial noise la ldata
+        if(noise)
+            for(auto &l : ldata)
+                l.dist += normal_dist(mt);
+
+        // get n random angles to apply hard noise on them
+        static std::uniform_int_distribution<int> unif_dist(0, ldata.size());
+        static std::uniform_int_distribution<int> accept_dist(0, 10);
+        static auto generator = std::bind(unif_dist, mt);
+        std::vector<int> samples(constants.num_lidar_affected_rays_by_hard_noise, unif_dist(mt));
+        std::generate_n(samples.begin(), constants.num_lidar_affected_rays_by_hard_noise, generator);
+        for(auto &s: samples)
+            if(accept_dist(mt) < 3)
+                ldata[s].dist /= 3;
+
         draw_laser( ldata );
         if(target.active)
             update_map(ldata);
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
+    return ldata;
 }
 void SpecificWorker::read_camera()
 {
@@ -233,7 +303,7 @@ Eigen::Matrix3f SpecificWorker::from_grid_to_robot_matrix()
 }
 /////////////////////////////////////////////////////////////////////////
 
-void SpecificWorker::draw_path(const std::list<QPointF> &path)
+void SpecificWorker::draw_path(const std::vector<Eigen::Vector2f> &path_in_robot)
 {
     static std::vector<QGraphicsItem *> path_paint;
     static QString path_color = "Green";
@@ -243,9 +313,9 @@ void SpecificWorker::draw_path(const std::list<QPointF> &path)
     path_paint.clear();
 
     uint s = 100;
-    for(auto &&p : path)
+    for(auto &&p : path_in_robot)
     {
-        auto pw = from_grid_to_world(Eigen::Vector2f(p.x(),p.y()));  // in mm
+        auto pw = from_robot_to_world(p);  // in mm
         path_paint.push_back(viewer->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
         path_paint.back()->setZValue(30);
     }
@@ -266,6 +336,59 @@ void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata) // robot
     color.setAlpha(40);
     laser_polygon = viewer->scene.addPolygon(laser_in_robot_polygon->mapToScene(poly), QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(3);
+}
+void SpecificWorker::draw_solution_path(const std::vector<double> &path, const mpc::MPC::Balls &balls)
+{
+    static std::vector<QGraphicsItem *> path_paint, ball_paint, ball_grads, ball_centers;
+    static QString path_color = "Orange";
+    static QString ball_color = "LightBlue";
+
+    for(auto p : path_paint)
+        viewer->scene.removeItem(p);
+    path_paint.clear();
+    for(auto p : ball_paint)
+        viewer->scene.removeItem(p);
+    ball_paint.clear();
+    for(auto p : ball_grads)
+        viewer->scene.removeItem(p);
+    ball_grads.clear();
+    for(auto p : ball_centers)
+        viewer->scene.removeItem(p);
+    ball_centers.clear();
+
+    uint s = 100;
+    std::vector<Eigen::Vector2f> qpath(path.size()/2);
+    std::vector<Eigen::Vector2f> path_centers;
+    for(auto &&[i, p] : iter::chunked(path, 2) | iter::enumerate)
+    {
+        auto pw = from_robot_to_world(Eigen::Vector2f(p[0], p[1])*1000);  // in mm
+        path_centers.push_back(pw);
+        path_paint.push_back(viewer->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
+        path_paint.back()->setZValue(30);
+    }
+    uint i=0;
+    auto balls_temp = balls;
+    balls_temp.erase(balls_temp.begin());
+    for(auto &[center, r, grad] : balls_temp)
+    {
+        auto bc = from_robot_to_world(center.cast<float>()*1000);
+        auto nr = r*1000;
+        ball_paint.push_back(viewer->scene.addEllipse(bc.x()-nr, bc.y()-nr, nr*2 , nr*2, QPen(QBrush("DarkBlue"),15), QBrush(QColor(ball_color))));
+        ball_paint.back()->setZValue(15);
+        ball_paint.back()->setOpacity(0.07);
+
+        // grads
+        if(i < path_centers.size())
+        {
+            ball_grads.push_back(viewer->scene.addLine(path_centers[i].x(), path_centers[i].y(), bc.x(), bc.y(), QPen(QBrush("Magenta"), 20)));
+            i++;
+        }
+
+        // centers
+        //ball_centers.push_back(viewer_robot->scene.addEllipse(bc.x()-20, bc.y()-20, 40, 40, QPen(QColor("Magenta")), QBrush(QColor("Magenta"))));
+        //ball_centers.back()->setZValue(30);
+    }
+
 }
 void SpecificWorker::new_target_slot(QPointF t)
 {
@@ -300,7 +423,7 @@ void SpecificWorker::update_map(const RoboCompLaser::TLaserData &ldata)
             int last_kx = std::numeric_limits<int>::min();
             int last_kz = std::numeric_limits<int>::min();
 
-            int num_steps = ceil(l.dist/(constants.tile_size/2.0));
+            int num_steps = ceil(l.dist/(constants.tile_size/3.0));
             for(const auto &&step : iter::range(0.0, 1.0-(1.0/num_steps), 1.0/num_steps))
             {
                 Eigen::Vector3f p = tip*step;
@@ -317,6 +440,21 @@ void SpecificWorker::update_map(const RoboCompLaser::TLaserData &ldata)
             //     grid.add_miss(from_robot_to_world(tip));
         }
     }
+}
+void SpecificWorker::move_robot(float adv, float rot, float side)
+{
+    try
+    {
+        differentialrobot_proxy->setSpeedBase(adv, rot);
+    }
+    catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
+}
+float SpecificWorker::gaussian(float x)
+{
+    const double xset = constants.xset_gaussian;
+    const double yset = constants.yset_gaussian;
+    const double s = -xset*xset/log(yset);
+    return exp(-x*x/s);
 }
 ////////////////////////////////////////////////////////////////////////////
 

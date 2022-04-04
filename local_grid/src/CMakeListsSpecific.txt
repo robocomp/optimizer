@@ -5,6 +5,7 @@ SET ( SOURCES
   #$ENV{ROBOCOMP}/classes/grid2d/grid.cpp
   /home/robocomp/robocomp/classes/grid2d/grid.cpp
   $ENV{ROBOCOMP}/classes/abstract_graphic_viewer/abstract_graphic_viewer.h
+  mpc.cpp
 )
 
 # Headers set
