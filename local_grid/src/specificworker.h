@@ -57,19 +57,19 @@ class SpecificWorker : public GenericWorker
         struct Constants
         {
             uint num_steps_mpc = 10;
-            const float max_advance_speed = 800;
+            const float max_advance_speed = 1200;
             float tile_size = 100;
             const float max_laser_range = 4000;
             float current_rot_speed = 0;
             float current_adv_speed = 0;
-            float robot_length = 450;
+            float robot_length = 500;
             const float robot_semi_length = robot_length/2.0;
-            const float final_distance_to_target = 150; //mm
+            const float final_distance_to_target = 600; //mm
             const float min_dist_to_target = 100; //mm
             float lidar_noise_sigma  = 15;
             const int num_lidar_affected_rays_by_hard_noise = 1;
             double xset_gaussian = 0.5;             // gaussian break x set value
-            double yset_gaussian = 0.6;             // gaussian break y set value
+            double yset_gaussian = 0.7;             // gaussian break y set value
             const float target_noise_sigma = 50;
         };
         Constants constants;
@@ -101,7 +101,7 @@ class SpecificWorker : public GenericWorker
         void goto_target_mpc(const std::vector<Eigen::Vector2d> &path_robot, const RoboCompLaser::TLaserData &ldata);
         void move_robot(float adv, float rot, float side=0);
 
-    // grid
+         // grid
         QRectF dimensions;
         Grid grid;
         Pose2D grid_world_pose;
@@ -118,10 +118,16 @@ class SpecificWorker : public GenericWorker
         struct Target
         {
             bool active = false;
-            QPointF pos;
             QGraphicsEllipseItem *draw = nullptr;
+            void set_pos(const QPointF &p) { pos_ant = pos; pos = p;};
+            QPointF get_pos() const { return pos;};
             Eigen::Vector2f to_eigen() const {return Eigen::Vector2f(pos.x(), pos.y());}
             Eigen::Vector3f to_eigen_3() const {return Eigen::Vector3f(pos.x()/1000.f, pos.y()/1000.f, 1.f);}
+            float dist_to_target_ant() const {return (to_eigen() - Eigen::Vector2f(pos_ant.x(), pos_ant.y())).norm();};
+
+            private:
+                    QPointF pos, pos_ant = QPoint(0.f,0.f);
+
         };
         Target target;
         template <typename Func, typename Obj>

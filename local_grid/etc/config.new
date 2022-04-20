@@ -1,13 +1,13 @@
 CommonBehavior.Endpoints=tcp -p 10000
 
 # Proxies for required interfaces
-BillCoppeliaProxy = billcoppelia:tcp -h localhost -p 0
 CameraRGBDSimpleProxy = camerargbdsimple:tcp -h localhost -p 0
 CameraSimpleProxy = camerasimple:tcp -h localhost -p 0
 DifferentialRobotProxy = differentialrobot:tcp -h localhost -p 10004
 FullPoseEstimationProxy = fullposeestimation:tcp -h localhost -p 0
 JointMotorSimpleProxy = jointmotorsimple:tcp -h localhost -p 0
 LaserProxy = laser:tcp -h localhost -p 10003
+BillCoppeliaProxy = billcoppelia:tcp -h localhost -p 11046
 
 
 

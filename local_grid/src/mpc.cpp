@@ -142,17 +142,20 @@ namespace mpc
         for (auto k: iter::range(consts.num_steps))
             sum_dist_path += casadi::MX::sumsqr(pos(all, k) - e2v(path[k]));
 
-        // minimze distance to each element of path
+        // minimze sum of rotations
         auto sum_rot = opti_local.parameter();
         opti_local.set_value(sum_rot, 0.0);
         for (auto k: iter::range(consts.num_steps))
             sum_rot += casadi::MX::sumsqr(rot(k));
 
         //  J
-        opti_local.minimize( sum_dist_path + 0.1*sum_dist_target + sum_rot +
-                             5*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
-                             0.1*casadi::MX::dot(slack_vector, mu_vector));
+//        opti_local.minimize( sum_dist_path + 0.1*sum_dist_target + sum_rot +
+//                             casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
+//                             casadi::MX::dot(slack_vector, mu_vector));
 
+        opti_local.minimize( sum_dist_path  +
+                             casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
+                             casadi::MX::dot(slack_vector, mu_vector));
         // solve NLP ------
         try
         {

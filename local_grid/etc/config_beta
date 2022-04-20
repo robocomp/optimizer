@@ -7,6 +7,8 @@ LaserProxy = laser:tcp -h localhost -p 10003
 JointMotorSimpleProxy = jointmotorsimple:tcp -h localhost -p 10086
 FullPoseEstimationProxy = fullposeestimation:tcp -h localhost -p 10696
 CameraSimpleProxy = camerasimple:tcp -h localhost -p 10005
+BillCoppeliaProxy = billcoppelia:tcp -h localhost -p 11046
+
 
 Ice.Warn.Connections=0
 Ice.Trace.Network=0
