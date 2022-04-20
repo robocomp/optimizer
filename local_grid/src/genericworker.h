@@ -31,6 +31,7 @@
 #include <ui_mainUI.h>
 #include <CommonBehavior.h>
 
+#include <BillCoppelia.h>
 #include <CameraRGBDSimple.h>
 #include <CameraSimple.h>
 #include <DifferentialRobot.h>
@@ -44,7 +45,7 @@
 #define BASIC_PERIOD 100
 
 
-using TuplePrx = std::tuple<RoboCompCameraRGBDSimple::CameraRGBDSimplePrxPtr,RoboCompCameraSimple::CameraSimplePrxPtr,RoboCompDifferentialRobot::DifferentialRobotPrxPtr,RoboCompFullPoseEstimation::FullPoseEstimationPrxPtr,RoboCompJointMotorSimple::JointMotorSimplePrxPtr,RoboCompLaser::LaserPrxPtr>;
+using TuplePrx = std::tuple<RoboCompBillCoppelia::BillCoppeliaPrxPtr,RoboCompCameraRGBDSimple::CameraRGBDSimplePrxPtr,RoboCompCameraSimple::CameraSimplePrxPtr,RoboCompDifferentialRobot::DifferentialRobotPrxPtr,RoboCompFullPoseEstimation::FullPoseEstimationPrxPtr,RoboCompJointMotorSimple::JointMotorSimplePrxPtr,RoboCompLaser::LaserPrxPtr>;
 
 
 class GenericWorker : public QWidget, public Ui_guiDlg
@@ -60,6 +61,7 @@ public:
 	QMutex *mutex;
 
 
+	RoboCompBillCoppelia::BillCoppeliaPrxPtr billcoppelia_proxy;
 	RoboCompCameraRGBDSimple::CameraRGBDSimplePrxPtr camerargbdsimple_proxy;
 	RoboCompCameraSimple::CameraSimplePrxPtr camerasimple_proxy;
 	RoboCompDifferentialRobot::DifferentialRobotPrxPtr differentialrobot_proxy;

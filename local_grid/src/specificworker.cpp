@@ -75,6 +75,9 @@ void SpecificWorker::compute()
 {
     auto ldata = read_laser(true);
     robot_pose = read_robot();
+    // Bill
+    read_bill(robot_pose);  // sets target at 1m from Bill
+
     //read_camera();
     if(target.active)
     {
@@ -250,6 +253,40 @@ SpecificWorker::Pose2D SpecificWorker::read_robot()
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
     return rp;
+}
+bool SpecificWorker::read_bill(const Pose2D &robot_pose)
+{
+    static std::random_device rd;
+    static std::mt19937 mt(rd());
+    static std::normal_distribution<double> normal_dist(0.0, constants.target_noise_sigma);
+
+    try
+    {
+        auto pose = billcoppelia_proxy->getPose();
+        QLineF r_to_target(QPointF(pose.x, pose.y), QPointF(robot_pose.pos.x(), robot_pose.pos.y()));
+        auto t = r_to_target.pointAt(700.0 / r_to_target.length());
+        target.pos = t + QPointF(normal_dist(mt), normal_dist(mt));              // Adding noise to target
+        if(target.draw != nullptr) viewer->scene.removeItem(target.draw);
+        target.active = true;
+        target.draw = viewer->scene.addEllipse(target.pos.x()-100, target.pos.y()-100, 200, 200, QPen(QColor("magenta")), QBrush(QColor("magenta")));
+
+        // create local grid for mission
+        // if new target has changed enough, replace local grid
+        Eigen::Vector2f t_r= from_world_to_robot(target.to_eigen());
+        float dist_to_robot = t_r.norm();
+        //    qInfo() << __FUNCTION__ << dist_to_robot_1 << dist_to_robot << dist_to_robot_2;
+        QRectF dim(-2000, -500, 4000, dist_to_robot+1000);
+        grid_world_pose = {.ang=-atan2(t_r.x(), t_r.y()) + robot_pose.ang, .pos=robot_pose.pos};
+        grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
+                        grid_world_pose.toQpointF(), grid_world_pose.ang);
+    }
+    catch(const Ice::Exception &e)
+    {
+        qInfo() << "Error connecting to Bill Coppelia";
+        std::cout << e.what() << std::endl;
+        return false;
+    }
+    return true;
 }
 Eigen::Vector2f SpecificWorker::from_robot_to_world(const Eigen::Vector2f &p)
 {

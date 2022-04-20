@@ -70,6 +70,7 @@ class SpecificWorker : public GenericWorker
             const int num_lidar_affected_rays_by_hard_noise = 1;
             double xset_gaussian = 0.5;             // gaussian break x set value
             double yset_gaussian = 0.6;             // gaussian break y set value
+            const float target_noise_sigma = 50;
         };
         Constants constants;
 
@@ -135,6 +136,8 @@ class SpecificWorker : public GenericWorker
 
         float gaussian(float x);
         void draw_solution_path(const vector<double> &path,  const mpc::MPC::Balls &balls);
+
+        bool read_bill(const Pose2D &robot_pose);
 };
 
 #endif

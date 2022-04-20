@@ -14,6 +14,8 @@ SET ( HEADERS
   specificmonitor.h
 )
 
+set(CMAKE_CXX_STANDARD 20)
+
 find_package(casadi)
 INCLUDE( $ENV{ROBOCOMP}/cmake/modules/opencv4.cmake )
 add_definitions(-g -march=native  -fmax-errors=5 )
