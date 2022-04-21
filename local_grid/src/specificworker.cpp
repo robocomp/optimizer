@@ -73,7 +73,8 @@ void SpecificWorker::initialize(int period)
 }
 void SpecificWorker::compute()
 {
-    auto ldata = read_laser(true);
+    static std::vector<Eigen::Vector2d> path_ant;
+    auto ldata = read_laser(false);
     robot_pose = read_robot();
     // Bill
     read_bill(robot_pose);  // sets target at 1m from Bill
@@ -82,9 +83,14 @@ void SpecificWorker::compute()
     if(target.active)
     {
         auto path = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
+        auto target_r = from_world_to_robot(target.to_eigen());
+        if(target_r.norm() < 100)
+        {
+            move_robot(0,0);
+            return;
+        }
         if(path.size() < constants.num_steps_mpc)
         {
-            auto target_r = from_world_to_robot(target.to_eigen());
             float adv = std::clamp(target_r.norm(), 0.f, 500.f);
             float rot = atan2(target_r.x(), target_r.y());
             move_robot(adv, rot);
@@ -272,12 +278,13 @@ bool SpecificWorker::read_bill(const Pose2D &robot_pose)
         // create local grid for mission
         // if new target has changed enough, replace local grid
         QPointF t_in_grid = e2q(from_world_to_grid(target.to_eigen()));
-        if( not grid.dim.contains(t_in_grid))
+        auto r = grid.dim.adjusted(-grid.dim.left()*0.2, -grid.dim.top()*0.2, -grid.dim.right()*0.2, -grid.dim.bottom()*0.2);
+        if( not r.contains(t_in_grid))
         {
             Eigen::Vector2f t_r = from_world_to_robot(target.to_eigen());
             float dist_to_robot = t_r.norm();
             //    qInfo() << __FUNCTION__ << dist_to_robot_1 << dist_to_robot << dist_to_robot_2;
-            QRectF dim(-2000, -500, 4000, dist_to_robot + 1000);
+            QRectF dim(-2000, -500, 4000, dist_to_robot + 2000);
             grid_world_pose = {.ang=-atan2(t_r.x(), t_r.y()) + robot_pose.ang, .pos=robot_pose.pos};
             grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
                             grid_world_pose.toQpointF(), grid_world_pose.ang);

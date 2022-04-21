@@ -173,8 +173,11 @@ namespace mpc
             // print output -----
             std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
             std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
-            auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
-            auto rotation = std::vector<double>(solution.value(rot)).front();
+            //auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
+            //auto rotation = std::vector<double>(solution.value(rot)).front();
+            auto advance = std::vector<double>(solution.value(adv)).at(1) * 1000;
+            auto rotation = std::vector<double>(solution.value(rot)).at(1);
+
             //qInfo() << std::vector<double>(solution.value(rot));
             qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
             qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
