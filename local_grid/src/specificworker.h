@@ -67,7 +67,7 @@ class SpecificWorker : public GenericWorker
             const float final_distance_to_target = 600; //mm
             const float min_dist_to_target = 100; //mm
             float lidar_noise_sigma  = 15;
-            const int num_lidar_affected_rays_by_hard_noise = 1;
+            const int num_lidar_affected_rays_by_hard_noise = 0;
             double xset_gaussian = 0.5;             // gaussian break x set value
             double yset_gaussian = 0.7;             // gaussian break y set value
             const float target_noise_sigma = 50;
