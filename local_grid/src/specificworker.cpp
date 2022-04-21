@@ -76,29 +76,32 @@ void SpecificWorker::compute()
     auto ldata = read_laser(true);
     robot_pose = read_robot();
     // Bill
-    //read_bill(robot_pose);  // sets target at 1m from Bill
+    read_bill(robot_pose);  // sets target at 1m from Bill
 
     //read_camera();
     if(target.active)
     {
-        std::vector<Eigen::Vector2f> path;
-        path = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
-        if(path.empty() and from_world_to_robot(target.to_eigen()).norm() > 100)
+        auto path = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
+        if(path.size() < constants.num_steps_mpc)
         {
-            qInfo() << "Robot at target. Stopping the robot";
-            move_robot(0, 0);
-            return;
+            auto target_r = from_world_to_robot(target.to_eigen());
+            float adv = std::clamp(target_r.norm(), 0.f, 500.f);
+            float rot = atan2(target_r.x(), target_r.y());
+            move_robot(adv, rot);
         }
-        auto g2r = from_grid_to_robot_matrix();
-        std::vector<Eigen::Vector2d> path_robot_meters(path.size());
-        for (auto &&[i, p]: path | iter::enumerate)
+        else
         {
-            p = (g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2);
-            path_robot_meters[i] = Eigen::Vector3d(p.x(), p.y(), 1.f).head(2)/1000.0;  // meters
+            auto g2r = from_grid_to_robot_matrix();
+            std::vector<Eigen::Vector2d> path_robot_meters(path.size());
+            for (auto &&[i, p]: path | iter::enumerate)
+            {
+                p = (g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2);
+                path_robot_meters[i] = Eigen::Vector3d(p.x(), p.y(), 1.f).head(2) / 1000.0;  // meters
+            }
+            draw_path(path);
+            //goto_target_carrot(path);
+            goto_target_mpc(path_robot_meters, ldata);
         }
-        draw_path(path);
-        //goto_target_carrot(path);
-        goto_target_mpc(path_robot_meters, ldata);
     }
     else
         qInfo() << __FUNCTION__ << "IDLE";
@@ -116,12 +119,6 @@ void SpecificWorker::goto_target_mpc(const std::vector<Eigen::Vector2d> &path_ro
             target.active = false;
             qInfo() << __FUNCTION__ << "Target reached";
     };
-
-    if(path_robot.size() < constants.num_steps_mpc)
-    {
-        exit();
-        return;
-    }
 
     if(auto r = mpc.minimize_balls_path(path_robot, robot_pose.to_vec3_meters(), ldata); r.has_value())
     {
