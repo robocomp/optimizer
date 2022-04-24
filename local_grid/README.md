@@ -1,6 +1,18 @@
 # giraff_viewer
 Intro to component here
 
+### Installing Casadi from source
+
+1. Install the following: ```sudo apt-get install gcc g++ gfortran git cmake liblapack-dev pkg-config --install-recommends```
+2. Install IPOPT: ```sudo apt-get install coinor-libipopt-dev```
+4. Clone the casadi repo: ```git clone https://github.com/casadi/casadi.git```
+5. Create a build directory for an out-of-source build:
+```
+cd casadi
+cmake -DWITH_COMMON=ON -DWITH_IPOPT=ON .
+make
+sudo make install
+```
 
 ## Configuration parameters
 As any other component, *giraff_viewer* needs a configuration file to start. In

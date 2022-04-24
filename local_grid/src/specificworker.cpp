@@ -62,6 +62,15 @@ void SpecificWorker::initialize(int period)
     // MPC
     mpc.initialize_differential(constants.num_steps_mpc);
 
+    // Global Grid
+    QRectF dim(-5000, -2500, 10000, 5000);
+    grid_world_pose = {.ang=0, .pos=Eigen::Vector2f(0,0)};
+    grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
+                    grid_world_pose.toQpointF(), grid_world_pose.ang);
+    // obstacle
+    for(auto i : iter::range(-1700, 2500))
+        grid.setOccupied(1000, i);
+
     // mouse clicking
     connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
 
@@ -73,11 +82,12 @@ void SpecificWorker::initialize(int period)
 }
 void SpecificWorker::compute()
 {
-    static std::vector<Eigen::Vector2d> path_ant;
     auto ldata = read_laser(false);
     robot_pose = read_robot();
+    grid.update_costs();
+
     // Bill
-    read_bill(robot_pose);  // sets target at 1m from Bill
+    //read_bill(robot_pose);  // sets target at 1m from Bill
 
     //read_camera();
     if(target.active)
@@ -87,6 +97,8 @@ void SpecificWorker::compute()
         if(target_r.norm() < 100)
         {
             move_robot(0,0);
+            target.active = false;
+            qInfo() << __FUNCTION__ << "At target" << target_r.norm();
             return;
         }
         if(path.size() < constants.num_steps_mpc)
@@ -215,8 +227,8 @@ RoboCompLaser::TLaserData SpecificWorker::read_laser(bool noise)
                 ldata[s].dist /= 3;
 
         draw_laser( ldata );
-        if(target.active)
-            update_map(ldata);
+//        if(target.active)
+//            update_map(ldata);
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
     return ldata;
@@ -382,7 +394,7 @@ void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata) // robot
     QColor color("LightGreen");
     color.setAlpha(40);
     laser_polygon = viewer->scene.addPolygon(laser_in_robot_polygon->mapToScene(poly), QPen(QColor("DarkGreen"), 30), QBrush(color));
-    laser_polygon->setZValue(3);
+    laser_polygon->setZValue(30);
 }
 void SpecificWorker::draw_solution_path(const std::vector<double> &path, const mpc::MPC::Balls &balls)
 {
@@ -422,7 +434,7 @@ void SpecificWorker::draw_solution_path(const std::vector<double> &path, const m
         auto nr = r*1000;
         ball_paint.push_back(viewer->scene.addEllipse(bc.x()-nr, bc.y()-nr, nr*2 , nr*2, QPen(QBrush("DarkBlue"),15), QBrush(QColor(ball_color))));
         ball_paint.back()->setZValue(15);
-        ball_paint.back()->setOpacity(0.07);
+        ball_paint.back()->setOpacity(0.2);
 
         // grads
         if(i < path_centers.size())
@@ -443,14 +455,14 @@ void SpecificWorker::new_target_slot(QPointF t)
     target.set_pos(t);
     target.active = true;
     // create local grid for mission
-    Eigen::Vector2f t_r= from_world_to_robot(target.to_eigen());
-    float dist_to_robot = t_r.norm();
-    //    qInfo() << __FUNCTION__ << dist_to_robot_1 << dist_to_robot << dist_to_robot_2;
-    QRectF dim(-2000, -500, 4000, dist_to_robot+1000);
-    grid_world_pose = {.ang=-atan2(t_r.x(), t_r.y()) + robot_pose.ang, .pos=robot_pose.pos};
-    grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
-                    grid_world_pose.toQpointF(), grid_world_pose.ang);
-    qInfo() << __FUNCTION__ << " Initial grid pos:" << grid_world_pose.pos.x() << grid_world_pose.pos.y() << grid_world_pose.ang;
+//    Eigen::Vector2f t_r= from_world_to_robot(target.to_eigen());
+//    float dist_to_robot = t_r.norm();
+//    //    qInfo() << __FUNCTION__ << dist_to_robot_1 << dist_to_robot << dist_to_robot_2;
+//    QRectF dim(-2000, -500, 4000, dist_to_robot+1000);
+//    grid_world_pose = {.ang=-atan2(t_r.x(), t_r.y()) + robot_pose.ang, .pos=robot_pose.pos};
+//    grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
+//                    grid_world_pose.toQpointF(), grid_world_pose.ang);
+//    qInfo() << __FUNCTION__ << " Initial grid pos:" << grid_world_pose.pos.x() << grid_world_pose.pos.y() << grid_world_pose.ang;
 
 }
 void SpecificWorker::update_map(const RoboCompLaser::TLaserData &ldata)
