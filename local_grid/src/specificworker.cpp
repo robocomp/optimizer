@@ -68,8 +68,14 @@ void SpecificWorker::initialize(int period)
     grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
                     grid_world_pose.toQpointF(), grid_world_pose.ang);
     // obstacle
-    for(auto i : iter::range(-1700, 2500))
-        grid.setOccupied(1000, i);
+//    for(auto i : iter::range(-1700, 2500))
+//        grid.setOccupied(1000, i);
+//    for(auto i : iter::range(-2500, 1700))
+//        grid.setOccupied(-1000, i);
+//    for(auto i : iter::range(-5000, 5000))
+//        grid.setOccupied(i, -2500);
+//    for(auto i : iter::range(-5000, 5000))
+//        grid.setOccupied(i, 2400);
 
     // mouse clicking
     connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
@@ -82,9 +88,8 @@ void SpecificWorker::initialize(int period)
 }
 void SpecificWorker::compute()
 {
-    auto ldata = read_laser(false);
+    auto ldata = read_laser(true);
     robot_pose = read_robot();
-    grid.update_costs();
 
     // Bill
     //read_bill(robot_pose);  // sets target at 1m from Bill
@@ -227,8 +232,8 @@ RoboCompLaser::TLaserData SpecificWorker::read_laser(bool noise)
                 ldata[s].dist /= 3;
 
         draw_laser( ldata );
-//        if(target.active)
-//            update_map(ldata);
+        //if(target.active)
+            update_map(ldata);
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
     return ldata;
@@ -465,38 +470,87 @@ void SpecificWorker::new_target_slot(QPointF t)
 //    qInfo() << __FUNCTION__ << " Initial grid pos:" << grid_world_pose.pos.x() << grid_world_pose.pos.y() << grid_world_pose.ang;
 
 }
+std::vector<Eigen::Vector2f> SpecificWorker::bresenham(const Eigen::Vector2f &p1, const Eigen::Vector2f &p2)
+{
+    // Bresenham's line algorithm
+    std::vector<Eigen::Vector2f> res;
+    float x1 = p1.x();
+    float x2 = p2.x();
+    float y1 = p1.y();
+    float y2 = p2.y();
+
+    const bool steep = (fabs(y2 - y1) > fabs(x2 - x1));
+    if (steep)
+    {
+        std::swap(x1, y1);
+        std::swap(x2, y2);
+    }
+
+    if (x1 > x2)
+    {
+        std::swap(x1, x2);
+        std::swap(y1, y2);
+    }
+
+    const float dx = x2 - x1;
+    const float dy = fabs(y2 - y1);
+
+    float error = dx / 2.0f;
+    const int ystep = (y1 < y2) ? 1 : -1;
+    int y = (int) y1;
+
+    const int maxX = (int) x2;
+
+    for (int x = (int) x1; x <= maxX; x++)
+    {
+        if (steep)
+            res.emplace_back(Eigen::Vector2f(y, x));
+        else
+            res.emplace_back(Eigen::Vector2f(x, y));
+
+        error -= dy;
+        if (error < 0)
+        {
+            y += ystep;
+            error += dx;
+        }
+    }
+
+    return res;
+}
 void SpecificWorker::update_map(const RoboCompLaser::TLaserData &ldata)
 {
     // get the matrix to transform from robot to local_grid
     Eigen::Matrix3f r2g = from_robot_to_grid_matrix();
-
+    auto robot_in_grid = from_world_to_grid(Eigen::Vector2f(robot_pose.pos.x(), robot_pose.pos.y()));
     for(const auto &l : ldata)
     {
         if(l.dist > constants.robot_semi_length)
         {
-            Eigen::Vector3f tip(l.dist*sin(l.angle), l.dist*cos(l.angle), 1.f);
             // transform tip form robot's RS to local_grid RS
-            tip = r2g * tip;
-            int target_kx = (tip.x() - grid.dim.left()) / grid.TILE_SIZE;
-            int target_kz = (tip.y() - grid.dim.top()) / grid.TILE_SIZE;
-            int last_kx = std::numeric_limits<int>::min();
-            int last_kz = std::numeric_limits<int>::min();
+            Eigen::Vector2f tip = (r2g * Eigen::Vector3f(l.dist*sin(l.angle), l.dist*cos(l.angle), 1.f)).head(2);
+            Eigen::Vector2f tip_in_grid = grid.pointToGrid(tip);
 
-            int num_steps = ceil(l.dist/(constants.tile_size/3.0));
+//            int last_kx = std::numeric_limits<int>::min();
+//            int last_kz = std::numeric_limits<int>::min();
+
+//           for( const auto list = bresenham(robot_in_grid, tip); const auto pp: list)
+//                grid.add_miss(pp);
+//            if( l.dist < constants.max_laser_range)
+//                grid.add_hit(tip_in_grid);
+
+            int num_steps = ceil(l.dist/(constants.tile_size));
+            Eigen::Vector2f p;
             for(const auto &&step : iter::range(0.0, 1.0-(1.0/num_steps), 1.0/num_steps))
             {
-                Eigen::Vector3f p = tip*step;
-                int kx = (p.x() - grid.dim.left()) / grid.TILE_SIZE;
-                int kz = (p.y() - grid.dim.top()) / grid.TILE_SIZE;
-                if(kx != last_kx and kx != target_kx and kz != last_kz and kz != target_kz)
-                    grid.add_miss(p.head(2));
-                last_kx = kx;
-                last_kz = kz;
+                p = robot_in_grid * (1-step) + tip*step;
+                grid.add_miss(p);
             }
             if(l.dist <= constants.max_laser_range)
-                grid.add_hit(tip.head(2));
-            // else
-            //     grid.add_miss(from_robot_to_world(tip));
+                grid.add_hit(tip);
+            
+            if((p-tip).norm() < constants.tile_size)  // in case las miss overlaps tip
+                grid.add_hit(tip);
         }
     }
 }

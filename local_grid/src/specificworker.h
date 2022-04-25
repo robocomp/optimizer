@@ -66,11 +66,14 @@ class SpecificWorker : public GenericWorker
             const float robot_semi_length = robot_length/2.0;
             const float final_distance_to_target = 700; //mm
             const float min_dist_to_target = 100; //mm
-            float lidar_noise_sigma  = 15;
-            const int num_lidar_affected_rays_by_hard_noise = 0;
+            float lidar_noise_sigma  = 20;
+            const int num_lidar_affected_rays_by_hard_noise = 2;
             double xset_gaussian = 0.5;             // gaussian break x set value
             double yset_gaussian = 0.7;             // gaussian break y set value
             const float target_noise_sigma = 50;
+            const float prob_prior = 0.5;	        // Prior occupancy probability
+            const float prob_occ = 0.9;	            // Probability that cell is occupied with total confidence
+            const float prob_free = 0.3;            // Probability that cell is free with total confidence
         };
         Constants constants;
 
@@ -144,6 +147,8 @@ class SpecificWorker : public GenericWorker
         void draw_solution_path(const vector<double> &path,  const mpc::MPC::Balls &balls);
 
         bool read_bill(const Pose2D &robot_pose);
+
+        vector<Eigen::Vector2f> bresenham(const Eigen::Vector2f &p1, const Eigen::Vector2f &p2);
 };
 
 #endif
