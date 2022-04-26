@@ -548,11 +548,12 @@ void SpecificWorker::update_map(const RoboCompLaser::TLaserData &ldata)
             }
             if(l.dist <= constants.max_laser_range)
                 grid.add_hit(tip);
-            
+
             if((p-tip).norm() < constants.tile_size)  // in case las miss overlaps tip
                 grid.add_hit(tip);
         }
     }
+    grid.update_costs();
 }
 void SpecificWorker::move_robot(float adv, float rot, float side)
 {
