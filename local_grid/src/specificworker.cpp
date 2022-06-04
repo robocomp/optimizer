@@ -122,13 +122,14 @@ void SpecificWorker::compute()
                 path_robot_meters[i] = Eigen::Vector3d(p.x(), p.y(), 1.f).head(2) / 1000.0;  // meters
             }
             draw_path(path);
-            //goto_target_carrot(path);
-            goto_target_mpc(path_robot_meters, ldata);
+            goto_target_carrot(path);
+            //goto_target_mpc(path_robot_meters, ldata);
         }
     }
     else
         qInfo() << __FUNCTION__ << "IDLE";
 }
+
 /////////////////////////////////////////////////////////////////////////
 void SpecificWorker::goto_target_mpc(const std::vector<Eigen::Vector2d> &path_robot, const RoboCompLaser::TLaserData &ldata)  //path in robot RS
 {
@@ -165,7 +166,6 @@ void SpecificWorker::goto_target_mpc(const std::vector<Eigen::Vector2d> &path_ro
         robot_polygon->setBrush(QColor("red"));
     }
 }
-
 void SpecificWorker::goto_target_carrot(const std::vector<Eigen::Vector2f> &path_robot)  //path in robot RS
 {
     // lambda para unificar las dos salidas de los if
@@ -365,8 +365,8 @@ Eigen::Matrix3f SpecificWorker::from_grid_to_robot_matrix()
 {
     return from_robot_to_grid_matrix().inverse();
 }
-/////////////////////////////////////////////////////////////////////////
 
+/////////////////////////////////////////////////////////////////////////
 void SpecificWorker::draw_path(const std::vector<Eigen::Vector2f> &path_in_robot)
 {
     static std::vector<QGraphicsItem *> path_paint;
@@ -460,14 +460,14 @@ void SpecificWorker::new_target_slot(QPointF t)
     target.set_pos(t);
     target.active = true;
     // create local grid for mission
-//    Eigen::Vector2f t_r= from_world_to_robot(target.to_eigen());
-//    float dist_to_robot = t_r.norm();
-//    //    qInfo() << __FUNCTION__ << dist_to_robot_1 << dist_to_robot << dist_to_robot_2;
-//    QRectF dim(-2000, -500, 4000, dist_to_robot+1000);
-//    grid_world_pose = {.ang=-atan2(t_r.x(), t_r.y()) + robot_pose.ang, .pos=robot_pose.pos};
-//    grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
-//                    grid_world_pose.toQpointF(), grid_world_pose.ang);
-//    qInfo() << __FUNCTION__ << " Initial grid pos:" << grid_world_pose.pos.x() << grid_world_pose.pos.y() << grid_world_pose.ang;
+    Eigen::Vector2f t_r= from_world_to_robot(target.to_eigen());
+    float dist_to_robot = t_r.norm();
+    //    qInfo() << __FUNCTION__ << dist_to_robot_1 << dist_to_robot << dist_to_robot_2;
+    QRectF dim(-2000, -500, 4000, dist_to_robot+1000);
+    grid_world_pose = {.ang=-atan2(t_r.x(), t_r.y()) + robot_pose.ang, .pos=robot_pose.pos};
+    grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
+                    grid_world_pose.toQpointF(), grid_world_pose.ang);
+    qInfo() << __FUNCTION__ << " Initial grid pos:" << grid_world_pose.pos.x() << grid_world_pose.pos.y() << grid_world_pose.ang;
 
 }
 std::vector<Eigen::Vector2f> SpecificWorker::bresenham(const Eigen::Vector2f &p1, const Eigen::Vector2f &p2)
