@@ -26,6 +26,17 @@
 #ifndef SPECIFICWORKER_H
 #define SPECIFICWORKER_H
 
+
+#pragma push_macro("slots")
+#undef slots
+#include <pybind11/embed.h>
+#include <pybind11/stl.h>
+#include <pybind11/eigen.h>
+#include <pybind11/stl_bind.h>
+#include <pybind11/functional.h>
+#include <pybind11/numpy.h>
+#pragma pop_macro("slots")
+
 #include <genericworker.h>
 #include "/home/robocomp/robocomp/classes/abstract_graphic_viewer/abstract_graphic_viewer.h"
 #include <QGraphicsPolygonItem>
@@ -33,8 +44,12 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include "/home/robocomp/robocomp/classes/grid2d/grid.h"
+#include <fps/fps.h>
 #include "mpc.h"
+#include "carrot.h"
 
+namespace py = pybind11;
+using namespace pybind11::literals; // to bring in the `_a` literal
 
 class SpecificWorker : public GenericWorker
 {
@@ -68,8 +83,8 @@ class SpecificWorker : public GenericWorker
             const float min_dist_to_target = 100; //mm
             float lidar_noise_sigma  = 20;
             const int num_lidar_affected_rays_by_hard_noise = 2;
-            double xset_gaussian = 0.5;             // gaussian break x set value
-            double yset_gaussian = 0.7;             // gaussian break y set value
+            double xset_gaussian = 0.4;             // gaussian break x set value
+            double yset_gaussian = 0.1;             // gaussian break y set value
             const float target_noise_sigma = 50;
             const float prob_prior = 0.5;	        // Prior occupancy probability
             const float prob_occ = 0.9;	            // Probability that cell is occupied with total confidence
@@ -103,6 +118,7 @@ class SpecificWorker : public GenericWorker
         void goto_target_carrot(const std::vector<Eigen::Vector2f> &path_robot);
         void goto_target_mpc(const std::vector<Eigen::Vector2d> &path_robot, const RoboCompLaser::TLaserData &ldata);
         void move_robot(float adv, float rot, float side=0);
+        float gaussian(float x);
 
          // grid
         QRectF dimensions;
@@ -121,15 +137,24 @@ class SpecificWorker : public GenericWorker
         struct Target
         {
             bool active = false;
-            QGraphicsEllipseItem *draw = nullptr;
             void set_pos(const QPointF &p) { pos_ant = pos; pos = p;};
             QPointF get_pos() const { return pos;};
             Eigen::Vector2f to_eigen() const {return Eigen::Vector2f(pos.x(), pos.y());}
             Eigen::Vector3f to_eigen_3() const {return Eigen::Vector3f(pos.x()/1000.f, pos.y()/1000.f, 1.f);}
             float dist_to_target_ant() const {return (to_eigen() - Eigen::Vector2f(pos_ant.x(), pos_ant.y())).norm();};
+            bool is_new() { if(is_new_var){ is_new_var = false; return true;} else return false; };
+            void set_new(bool v) {is_new_var = v;}
+            void draw(QGraphicsScene &scene)
+            {
+                if(draw_point != nullptr) scene.removeItem(draw_point);
+                draw_point = scene.addEllipse(pos.x()-100, pos.y()-100, 200, 200, QPen(QColor("Magenta")), QBrush(QColor("magenta")));
+                draw_point->setZValue(300);
+            };
 
             private:
-                    QPointF pos, pos_ant = QPoint(0.f,0.f);
+                QPointF pos, pos_ant = QPoint(0.f,0.f);
+                QGraphicsEllipseItem *draw_point = nullptr;
+                bool is_new_var=true;
 
         };
         Target target;
@@ -139,16 +164,27 @@ class SpecificWorker : public GenericWorker
 
         // path
         void draw_path(const std::vector<Eigen::Vector2f> &path_in_robot);
+        void draw_solution_path(const vector<double> &path,  const mpc::MPC::Balls &balls);
+        double path_length(const std::vector<Eigen::Vector2f> &path);
 
-        // mpc
+    // mpc
         mpc::MPC mpc;
 
-        float gaussian(float x);
-        void draw_solution_path(const vector<double> &path,  const mpc::MPC::Balls &balls);
-
+       // Bill
         bool read_bill(const Pose2D &robot_pose);
 
+        // FPS
+        FPSCounter fps;
+
+        // not used
         vector<Eigen::Vector2f> bresenham(const Eigen::Vector2f &p1, const Eigen::Vector2f &p2);
+
+        // pathfolloweres
+        Carrot carrot;
+
+        // pythons
+        pybind11::scoped_interpreter guard{}; // start the interpreter and keep it alive
+
 };
 
 #endif

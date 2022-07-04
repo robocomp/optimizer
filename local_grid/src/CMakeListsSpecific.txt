@@ -6,6 +6,7 @@ SET ( SOURCES
   /home/robocomp/robocomp/classes/grid2d/grid.cpp
   $ENV{ROBOCOMP}/classes/abstract_graphic_viewer/abstract_graphic_viewer.h
   mpc.cpp
+  carrot.cpp
 )
 
 # Headers set
@@ -14,12 +15,14 @@ SET ( HEADERS
   specificmonitor.h
 )
 
+find_package(pybind11 REQUIRED)
+
 set(CMAKE_CXX_STANDARD 20)
 
 find_package(casadi)
 INCLUDE( $ENV{ROBOCOMP}/cmake/modules/opencv4.cmake )
-add_definitions(-g -march=native  -fmax-errors=5 )
+add_definitions(-g -march=native  -fmax-errors=5 -fvisibility-inlines-hidden)
 
-SET (LIBS ${LIBS} tbb  casadi  )
+SET (LIBS ${LIBS} tbb  casadi  pybind11::embed)
 
 
