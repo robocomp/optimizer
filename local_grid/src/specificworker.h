@@ -184,6 +184,8 @@ class SpecificWorker : public GenericWorker
 
         // pythons
         pybind11::scoped_interpreter guard{}; // start the interpreter and keep it alive
+        py::object interpolate_spline, evaluate_spline;
+        py::module np;
 
 };
 

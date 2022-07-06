@@ -12,16 +12,15 @@ std::tuple<float, float, float> Carrot::update(const std::vector<Eigen::Vector2f
     {
         // get a good target from the path
         // advance through the path until curvature is high, or max_dist.
-        for(auto &&seg : path_robot | iter::sliding_window(3))
-        {
-            QLineF l1(e2q(seg[0]), e2q(seg[1]));
-            QLineF l2(e2q(seg[1]), e2q(seg[2]));
-            auto rad = cos(qDegreesToRadians(l1.angleTo(l2)));
-            qInfo() << __FUNCTION__ << rad;
-        }
-        qInfo() << __FUNCTION__ << "------------------";
+//        for(auto &&seg : path_robot | iter::sliding_window(3))
+//        {
+//            QLineF l1(e2q(seg[0]), e2q(seg[1]));
+//            QLineF l2(e2q(seg[1]), e2q(seg[2]));
+//            auto rad = cos(qDegreesToRadians(l1.angleTo(l2)));
+//            qInfo() << __FUNCTION__ << rad;
+//        }
+//        qInfo() << __FUNCTION__ << "------------------";
         Eigen::Vector2f target_r = path_robot.front();
-
 
         float dist = target_r.norm();
         //qInfo() << __FUNCTION__ << path_robot.size() << dist;

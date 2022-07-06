@@ -21,6 +21,7 @@
 #include <cppitertools/enumerate.hpp>
 #include <cppitertools/chunked.hpp>
 #include <cppitertools/sliding_window.hpp>
+#include <cppitertools/zip.hpp>
 
 /**
 * \brief Default constructor
@@ -81,12 +82,11 @@ void SpecificWorker::initialize(int period)
     connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
 
     // Python
-    py::module np = py::module::import("numpy");
-    py::object plt = py::module::import("matplotlib.pyplot");
+    np = py::module::import("numpy");
     // create a spline object
-    py::object app_spline = py::module::import("scipy.interpolate").attr("splprep");
+    interpolate_spline = py::module::import("scipy.interpolate").attr("splprep");
     // create a spline evaluator
-    py::object get_spline = py::module::import("scipy.interpolate").attr("splev");
+    evaluate_spline = py::module::import("scipy.interpolate").attr("splev");
 
     this->Period = period;
 	if(this->startup_check_flag)
@@ -120,7 +120,7 @@ void SpecificWorker::compute()
         {
             qInfo() << __FUNCTION__ <<  target.get_pos() << e2q(from_world_to_grid(target.to_eigen()));
             current_path_grid = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
-            qInfo() << __FUNCTION__ << current_path_grid.size();
+            qInfo() << __FUNCTION__ << "Path size:" << current_path_grid.size();
             if(current_path_grid.empty())
             {
                 qWarning() << __FUNCTION__ << "No path found";
@@ -147,12 +147,35 @@ void SpecificWorker::compute()
         std::erase_if(current_path_grid, [r = from_world_to_grid(robot_pose.pos)](auto p){ return (p-r).norm() < 300;});
         current_path_grid.push_back(back);
 
-        // Convert to to robot coordinates
+        // smooth the path
+        if(current_path_grid.size() >3 )  // spline qDegreesToRadians
+        {
+            std::vector<float> x(current_path_grid.size()), y(current_path_grid.size());
+            for (const auto &[i, p]: current_path_grid | iter::enumerate)
+            {
+                x[i] = p.x();
+                y[i] = p.y();
+            }
+            py::tuple values = py::make_tuple(x, y);
+            py::tuple spline = interpolate_spline(values);
+            py::object unew = np.attr("arange")(0, 1.1, 0.1);
+            py::tuple out = evaluate_spline(unew, spline[0]);
+            //print in c++
+            qInfo() << "Path size" << current_path_grid.size();
+            for (const auto &[e0, e1]: iter::zip(out[0], out[1]))
+                std::cout << e0 << " " << e1 << std::endl;
+            qInfo() << "-----------------";
+//
+//        // Convert to  robot coordinates
+//        auto g2r = from_grid_to_robot_matrix();
+//        std::vector<Eigen::Vector2f> current_path_robot;
+//        for(const auto &&[px, py]: iter::zip(out[0], out[1]))
+//            current_path_robot.emplace_back((g2r * Eigen::Vector3f(py::cast<float>(px), py::cast<float>(py), 1.f)).head(2));
+        }
         auto g2r = from_grid_to_robot_matrix();
         std::vector<Eigen::Vector2f> current_path_robot;
         for(const auto &&[i, p]: iter::enumerate(current_path_grid))
             current_path_robot.emplace_back((g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2));
-
 
         //mpc
         //            if(current_path.size() < constants.num_steps_mpc)
