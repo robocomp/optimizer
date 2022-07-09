@@ -8,15 +8,18 @@ SET ( SOURCES
   mpc.cpp
   carrot.cpp
   dynamic_window.cpp
+  $ENV{ROBOCOMP}/classes/qcustomplot/qcustomplot.cpp
 )
 
 # Headers set
 SET ( HEADERS
   specificworker.h
   specificmonitor.h
+  $ENV{ROBOCOMP}/classes/qcustomplot/qcustomplot.h
 )
 
 find_package(pybind11 REQUIRED)
+find_package( Qt5PrintSupport )
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -24,6 +27,6 @@ find_package(casadi)
 INCLUDE( $ENV{ROBOCOMP}/cmake/modules/opencv4.cmake )
 add_definitions(-g -march=native  -fmax-errors=5 -fvisibility=hidden)
 
-SET (LIBS ${LIBS} tbb  casadi  pybind11::embed)
+SET (LIBS ${LIBS} tbb  casadi  pybind11::embed Qt5::PrintSupport)
 
 

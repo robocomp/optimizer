@@ -48,6 +48,7 @@
 #include "mpc.h"
 #include "carrot.h"
 #include "dynamic_window.h"
+#include "qcustomplot/qcustomplot.h"
 
 namespace py = pybind11;
 using namespace pybind11::literals; // to bring in the `_a` literal
@@ -197,7 +198,13 @@ class SpecificWorker : public GenericWorker
 
         // switch
         enum class Control {DWA, MPC, CARROT};
-        Control control = Control::CARROT;
+        Control control = Control::MPC;
+
+        // QCUSTOMPLOT
+        QCustomPlot custom_plot;
+        QCPGraph *distance_to_target_graph, *advance_speed_graph, *rotation_speed_graph;
+        void draw_timeseries(float dist, float adv, float rot);
+
 };
 
 #endif

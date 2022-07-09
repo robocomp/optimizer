@@ -13,7 +13,6 @@
 #include <QGraphicsEllipseItem>
 #include <Laser.h>
 
-
 namespace mpc
 {
     class MPC
@@ -25,7 +24,7 @@ namespace mpc
 
             struct Constants
             {
-                int num_steps = 10;                     // MPC steps ahead
+                unsigned int num_steps = 10;                     // MPC steps ahead
                 const float robot_radius = 300;
                 double gauss_dist = 0.1;                // minimun distance to a lidar-gaussian as constraint
                 double point_dist = 0.2;                // value in lidar-gaussian at lidar points (corners)
@@ -68,7 +67,8 @@ namespace mpc
 
             casadi::Opti initialize_differential(const int N);
             Result minimize_balls_path( const std::vector<Eigen::Vector2d> &path, const Eigen::Vector3d &current_pose_meters, const RoboCompLaser::TLaserData &ldata);
-
+            std::tuple<float, float, float> update( const std::vector<Eigen::Vector2f> &path, QGraphicsPolygonItem *robot_polygon = nullptr,
+                                                    QGraphicsScene *scene = nullptr);
             casadi::MX pos;
             casadi::MX rot;
 
@@ -86,6 +86,7 @@ namespace mpc
 
             std::vector<double> e2v(const Eigen::Vector2d &v);
             Ball compute_free_ball(const Eigen::Vector2d &center, const std::vector<Eigen::Vector2d> &lpoints);
+            void draw_path(const std::vector<Eigen::Vector2f> &path_robot_meters, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene);
     };
 
 } // mpc

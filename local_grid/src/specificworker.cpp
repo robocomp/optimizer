@@ -80,6 +80,21 @@ void SpecificWorker::initialize(int period)
     // create a spline evaluator
     evaluate_spline = py::module::import("scipy.interpolate").attr("splev");
 
+    //QCustomPlot
+    custom_plot.setParent(metrics_frame);
+    custom_plot.resize(metrics_frame->size());
+    custom_plot.xAxis->setLabel("time");
+    custom_plot.yAxis->setLabel("dist-blue adv-red rot-green");
+    custom_plot.xAxis->setRange(0, 200);
+    custom_plot.yAxis->setRange(-1500, 1500);
+    distance_to_target_graph = custom_plot.addGraph();
+    distance_to_target_graph->setPen(QColor("blue"));
+    advance_speed_graph = custom_plot.addGraph();
+    advance_speed_graph->setPen(QColor("red"));
+    rotation_speed_graph = custom_plot.addGraph();
+    rotation_speed_graph->setPen(QColor("green"));
+    custom_plot.resize(metrics_frame->size());
+    custom_plot.show();
 
     this->Period = period;
 	if(this->startup_check_flag)
@@ -134,27 +149,14 @@ void SpecificWorker::compute()
         // convert to robot coordinates
         std::vector<Eigen::Vector2f> current_path_robot = convert_to_robot_coordinates(smoothed_current_path_grid, current_path_grid);
 
-
-        //mpc
-        //            if(current_path.size() < constants.num_steps_mpc)
-        //            {
-        //                float adv = std::clamp(target_r.norm(), 0.f, 500.f);
-        //                float rot = atan2(target_r.x(), target_r.y());
-        //                move_robot(adv, rot);
-        //            }
-        //{
-        // auto g2r = from_grid_to_robot_matrix();
-        // std::vector<Eigen::Vector2d> path_robot_meters(path.size());
-        // for (auto &&[i, p]: path | iter::enumerate)
-        // {
-        //   p = (g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2);
-        //   path_robot_meters[i] = Eigen::Vector3d(p.x(), p.y(), 1.f).head(2) / 1000.0;  // meters
-        //  }
-            //goto_target_mpc(path_robot_meters, ldata);
-        //}
-
         float advf=0.f, rotf=0.f, sidef=0.f;
 
+        if(control == Control::MPC)
+        {
+            //auto [adv, rot, side] = mpc.update(current_path_robot, robot_polygon, &viewer->scene);
+            auto [adv, rot, side]  = mpc.update(current_path_robot, robot_polygon, &viewer->scene);
+            advf = adv; rotf = rot; sidef = side;
+        }
         if(control == Control::DWA)
         {
             auto [adv, rot, side] = dwa.update(current_path_robot, ldata, 0.f, 0.f, robot_polygon, &viewer->scene);
@@ -169,6 +171,9 @@ void SpecificWorker::compute()
         try
         { differentialrobot_proxy->setSpeedBase(advf, rotf); }
         catch (const Ice::Exception &e) { std::cout << e.what() << " Error talking to differentialrobot" << std::endl; }
+
+        // draw timeseries
+        draw_timeseries(target_r.norm(), advf, rotf);
     }
     else
         qInfo() << __FUNCTION__ << "IDLE";
@@ -496,6 +501,18 @@ void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata) // robot
     color.setAlpha(40);
     laser_polygon = viewer->scene.addPolygon(laser_in_robot_polygon->mapToScene(poly), QPen(QColor("DarkGreen"), 30), QBrush(color));
     laser_polygon->setZValue(30);
+}
+void SpecificWorker::draw_timeseries(float dist, float adv, float rot)
+{
+    static int cont=0;
+
+    distance_to_target_graph->addData(cont, dist);
+    advance_speed_graph->addData(cont, adv);
+    rotation_speed_graph->addData(cont, rot*300);  // visual scale
+    cont++;
+    // make key axis range scroll with the data (at a constant range size of 8):
+    custom_plot.xAxis->setRange(cont, 200, Qt::AlignRight);
+    custom_plot.replot();
 }
 void SpecificWorker::draw_solution_path(const std::vector<double> &path, const mpc::MPC::Balls &balls)
 {

@@ -5,6 +5,9 @@
 #include "mpc.h"
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
+#include <QGraphicsScene>
+#include <QPen>
+#include <QBrush>
 
 namespace mpc
 {
@@ -107,7 +110,7 @@ namespace mpc
             lpoints[i] = Eigen::Vector2d(l.dist*sin(l.angle)/1000.0, l.dist*cos(l.angle)/1000.0);
         Balls balls;
         balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25, Eigen::Vector2d(0.2, 0.3)});  // first point on robot
-        for (auto i: iter::range(0, consts.num_steps))
+        for (auto i: iter::range(0u, consts.num_steps))
         {
             opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
                                                                       previous_values_of_solution[3 * i + 1],
@@ -233,9 +236,134 @@ namespace mpc
         return std::make_tuple(new_center, current_dist, grad(new_center));
     }
 
+    std::tuple<float, float, float> MPC::update( const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
+    {
+        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
+        // transform path to meters
+        std::vector<Eigen::Vector2f> path_robot_meters(path_robot.size());
+        for(const auto &[i, p] : path_robot | iter::enumerate)
+            path_robot_meters[i] = p / 1000.f;
+
+        // target in robot RS in meters
+        auto target_robot = path_robot_meters.at(consts.num_steps-1);
+
+        if(path_robot.size() < consts.num_steps)
+        {
+            float adv = std::clamp(target_robot.norm(), 0.f, 500.f);
+            float rot = atan2(target_robot.x(), target_robot.y());
+            return std::make_tuple(adv, rot, 0.f);
+        }
+
+        auto opti_local = this->opti.copy();
+        casadi::Slice all;
+
+        // Warm start
+        if (previous_values_of_solution.empty())
+        {
+            previous_values_of_solution.resize(consts.num_steps+1);
+            double landa = 1.0 / (target_robot.norm() / consts.num_steps);
+            for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
+            {
+                auto paso = target_robot * step;
+                previous_values_of_solution[3 * i] = paso.x();
+                previous_values_of_solution[3 * i + 1] = paso.y();
+                previous_values_of_solution[3 * i + 2] = 0.0;
+            }
+        }
+
+        // cost function
+        double alfa = 1.1;
+        auto sum_dist_target = opti_local.parameter();
+        opti_local.set_value(sum_dist_target, 0.0);
+        auto t = e2v(target_robot.cast<double>());
+        for (auto k: iter::range(consts.num_steps+1))
+            sum_dist_target += pow(alfa,k) * casadi::MX::sumsqr(pos(all, k) - t);
+
+//        // minimize step size weighting more the furthest poses
+//        double beta = 1.1;
+//        auto sum_dist_local = opti_local.parameter();
+//        opti_local.set_value(sum_dist_local, 0.0);
+//        for (auto k: iter::range(2, consts.num_steps+1))
+//            sum_dist_local += pow(beta,k) * casadi::MX::sumsqr(state(all, k-1) - state(all, k));
+
+        // minimze distance to each element of path
+        auto sum_dist_path = opti_local.parameter();
+        opti_local.set_value(sum_dist_path, 0.0);
+        for (auto k: iter::range(consts.num_steps))
+            sum_dist_path += casadi::MX::sumsqr(pos(all, k) - e2v(path_robot_meters[k].cast<double>()));
+
+        // minimze sum of rotations
+        auto sum_rot = opti_local.parameter();
+        opti_local.set_value(sum_rot, 0.0);
+        for (auto k: iter::range(consts.num_steps))
+            sum_rot += casadi::MX::sumsqr(rot(k));
+
+        //  J
+//        opti_local.minimize( sum_dist_path + 0.1*sum_dist_target + sum_rot +
+//                             casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
+//                             casadi::MX::dot(slack_vector, mu_vector));
+
+        opti_local.minimize( sum_dist_path  + casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
+
+        // solve NLP ------
+        try
+        {
+            auto solution = opti_local.solve();
+            std::string retstat = solution.stats().at("return_status");
+            if (retstat.compare("Solve_Succeeded") != 0)
+            {
+                std::cout << "NOT succeeded" << std::endl;
+                //move_robot(0, 0);  //slow down
+                return {};
+            }
+            previous_values_of_solution = std::vector<double>(solution.value(state));
+            previous_control_of_solution = std::vector<double>(solution.value(control));
+
+            // print output -----
+            std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+            std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
+            //auto advance = std::vector<double>(solution.value(adv)).front() * 1000;
+            //auto rotation = std::vector<double>(solution.value(rot)).front();
+            auto advance = std::vector<double>(solution.value(adv)).at(1) * 1000;
+            auto rotation = std::vector<double>(solution.value(rot)).at(1);
+
+            //qInfo() << std::vector<double>(solution.value(rot));
+            qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
+            qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
+            if(scene != nullptr) draw_path(path_robot_meters, robot_polygon, scene);
+
+            return std::make_tuple(advance, rotation, 0.f);
+        }
+        catch (...)
+        {
+            std::cout << "No solution found" << std::endl;
+            previous_values_of_solution.clear();
+            previous_control_of_solution.clear();
+            return {};
+        }
+    }
     ////////////////////// AUX /////////////////////////////////////////////////
     std::vector<double> MPC::e2v(const Eigen::Vector2d &v)
     {
         return std::vector<double>{v.x(), v.y()};
     }
+    void MPC::draw_path(const std::vector<Eigen::Vector2f> &path_robot_meters, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
+    {
+        static std::vector<QGraphicsItem *> path_paint;
+        static QString path_color = "Green";
+
+        for(auto p : path_paint)
+            scene->removeItem(p);
+        path_paint.clear();
+
+        uint s = 100;
+        for(auto &&p : path_robot_meters)
+        {
+            auto pw = robot_polygon->mapToScene(QPointF(p.x(), p.y()));
+            path_paint.push_back(scene->addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
+            path_paint.back()->setZValue(30);
+        }
+    }
+
 } // mpc

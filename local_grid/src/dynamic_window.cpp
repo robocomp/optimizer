@@ -43,7 +43,7 @@ std::tuple<float, float, float> Dynamic_Window::update(const std::vector<Eigen::
     if(path_robot.size()>5)
         target_r = path_robot[5];
     else
-        target_r = path_robot.front();
+        target_r = path_robot.back();
     auto best_choice = compute_optimus(point_list, target_r, previous_turn);
 
     // draw target
