@@ -47,6 +47,7 @@
 #include <fps/fps.h>
 #include "mpc.h"
 #include "carrot.h"
+#include "dynamic_window.h"
 
 namespace py = pybind11;
 using namespace pybind11::literals; // to bring in the `_a` literal
@@ -72,7 +73,7 @@ class SpecificWorker : public GenericWorker
         struct Constants
         {
             uint num_steps_mpc = 8;
-            const float max_advance_speed = 1200;
+            const float max_advance_speed = 1500;
             float tile_size = 100;
             const float max_laser_range = 4000;
             float current_rot_speed = 0;
@@ -80,15 +81,16 @@ class SpecificWorker : public GenericWorker
             float robot_length = 500;
             const float robot_semi_length = robot_length/2.0;
             const float final_distance_to_target = 700; //mm
-            const float min_dist_to_target = 100; //mm
+            const float max_dist_to_target = 200; //mm
             float lidar_noise_sigma  = 20;
             const int num_lidar_affected_rays_by_hard_noise = 2;
             double xset_gaussian = 0.4;             // gaussian break x set value
-            double yset_gaussian = 0.1;             // gaussian break y set value
+            double yset_gaussian = 0.3;             // gaussian break y set value
             const float target_noise_sigma = 50;
             const float prob_prior = 0.5;	        // Prior occupancy probability
             const float prob_occ = 0.9;	            // Probability that cell is occupied with total confidence
-            const float prob_free = 0.3;            // Probability that cell is free with total confidence
+            const float prob_free = 0.4;            // Probability that cell is free with total confidence
+            const int period_to_check_occluded_path = 400; //ms
         };
         Constants constants;
 
@@ -166,8 +168,13 @@ class SpecificWorker : public GenericWorker
         void draw_path(const std::vector<Eigen::Vector2f> &path_in_robot);
         void draw_solution_path(const vector<double> &path,  const mpc::MPC::Balls &balls);
         double path_length(const std::vector<Eigen::Vector2f> &path);
+        std::vector<Eigen::Vector2f> smooth_spline(const std::vector<Eigen::Vector2f> &path_grid);
+        std::vector<Eigen::Vector2f> alternative_path(const std::vector<Eigen::Vector2f> &path_grid);
+        std::vector<Eigen::Vector2f> convert_to_robot_coordinates(const std::vector<Eigen::Vector2f> &smoothed_path_grid, const std::vector<Eigen::Vector2f> &path_grid);
+        std::vector<Eigen::Vector2f> remove_points_close_to_robot(const std::vector<Eigen::Vector2f> &path_grid);
+        void draw_path_smooth(const vector<Eigen::Vector2f> &path_in_robot);
 
-    // mpc
+        // mpc
         mpc::MPC mpc;
 
        // Bill
@@ -181,12 +188,16 @@ class SpecificWorker : public GenericWorker
 
         // pathfolloweres
         Carrot carrot;
+        Dynamic_Window dwa;
 
         // pythons
         pybind11::scoped_interpreter guard{}; // start the interpreter and keep it alive
         py::object interpolate_spline, evaluate_spline;
         py::module np;
 
+        // switch
+        enum class Control {DWA, MPC, CARROT};
+        Control control = Control::CARROT;
 };
 
 #endif

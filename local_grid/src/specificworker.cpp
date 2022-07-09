@@ -16,6 +16,7 @@
  *    You should have received a copy of the GNU General Public License
  *    along with RoboComp.  If not, see <http://www.gnu.org/licenses/>.
  */
+
 #include "specificworker.h"
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
@@ -68,15 +69,6 @@ void SpecificWorker::initialize(int period)
     grid_world_pose = {.ang=0, .pos=Eigen::Vector2f(0,0)};
     grid.initialize(dim, constants.tile_size, &viewer->scene, false, std::string(),
                     grid_world_pose.toQpointF(), grid_world_pose.ang);
-    // obstacle
-//    for(auto i : iter::range(-1700, 2500))
-//        grid.setOccupied(1000, i);
-//    for(auto i : iter::range(-2500, 1700))
-//        grid.setOccupied(-1000, i);
-//    for(auto i : iter::range(-5000, 5000))
-//        grid.setOccupied(i, -2500);
-//    for(auto i : iter::range(-5000, 5000))
-//        grid.setOccupied(i, 2400);
 
     // mouse clicking
     connect(viewer, &AbstractGraphicViewer::new_mouse_coordinates, this, &SpecificWorker::new_target_slot);
@@ -88,6 +80,7 @@ void SpecificWorker::initialize(int period)
     // create a spline evaluator
     evaluate_spline = py::module::import("scipy.interpolate").attr("splev");
 
+
     this->Period = period;
 	if(this->startup_check_flag)
 		this->startup_check();
@@ -97,7 +90,6 @@ void SpecificWorker::initialize(int period)
 void SpecificWorker::compute()
 {
     static std::vector<Eigen::Vector2f> current_path_grid;
-    static std::chrono::steady_clock::time_point begin_clock;
     auto ldata = read_laser(true);
     robot_pose = read_robot();
 
@@ -109,73 +101,39 @@ void SpecificWorker::compute()
     if(target.active)
     {
         auto target_r = from_world_to_robot(target.to_eigen());
-        if(target_r.norm() < 100)
+        qInfo() << __FUNCTION__ << "Dist to target:" << target_r.norm();
+        if(target_r.norm() < constants.max_dist_to_target)
         {
             move_robot(0,0);
             target.active = false;
             qInfo() << __FUNCTION__ << "At target" << target_r.norm();
             return;
         }
+
+        // replan conditions
         if (current_path_grid.empty() or target.is_new() or grid.is_path_blocked(current_path_grid))
         {
-            qInfo() << __FUNCTION__ <<  target.get_pos() << e2q(from_world_to_grid(target.to_eigen()));
             current_path_grid = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
-            qInfo() << __FUNCTION__ << "Path size:" << current_path_grid.size();
+            qInfo() << __FUNCTION__ <<  target.get_pos() << e2q(from_world_to_grid(target.to_eigen())) << "Path size:" << current_path_grid.size();
             if(current_path_grid.empty())
             {
                 qWarning() << __FUNCTION__ << "No path found";
                 return;
             }
-
-            begin_clock = std::chrono::steady_clock::now();
         }
 
-        std::chrono::steady_clock::time_point end_clock = std::chrono::steady_clock::now();
-        auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_clock - begin_clock).count();
-        std::vector<Eigen::Vector2f> temp_path;
-        if(elapsed_time > 400)
-        {
-            temp_path = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
-            if (path_length(temp_path) < path_length(current_path_grid) * 0.8)
-                current_path_grid = temp_path;
-            begin_clock = std::chrono::steady_clock::now();
-        }
+        // check for an alternative path
+        current_path_grid = alternative_path(current_path_grid);
 
         // remove too close points ahead of robot
-        auto back = current_path_grid.back();
-        current_path_grid.pop_back();
-        std::erase_if(current_path_grid, [r = from_world_to_grid(robot_pose.pos)](auto p){ return (p-r).norm() < 300;});
-        current_path_grid.push_back(back);
+        current_path_grid = remove_points_close_to_robot(current_path_grid);
 
-        // smooth the path
-        if(current_path_grid.size() >3 )  // spline qDegreesToRadians
-        {
-            std::vector<float> x(current_path_grid.size()), y(current_path_grid.size());
-            for (const auto &[i, p]: current_path_grid | iter::enumerate)
-            {
-                x[i] = p.x();
-                y[i] = p.y();
-            }
-            py::tuple values = py::make_tuple(x, y);
-            py::tuple spline = interpolate_spline(values);
-            py::object unew = np.attr("arange")(0, 1.1, 0.1);
-            py::tuple out = evaluate_spline(unew, spline[0]);
-            //print in c++
-            qInfo() << "Path size" << current_path_grid.size();
-            for (const auto &[e0, e1]: iter::zip(out[0], out[1]))
-                std::cout << e0 << " " << e1 << std::endl;
-            qInfo() << "-----------------";
-//
-//        // Convert to  robot coordinates
-//        auto g2r = from_grid_to_robot_matrix();
-//        std::vector<Eigen::Vector2f> current_path_robot;
-//        for(const auto &&[px, py]: iter::zip(out[0], out[1]))
-//            current_path_robot.emplace_back((g2r * Eigen::Vector3f(py::cast<float>(px), py::cast<float>(py), 1.f)).head(2));
-        }
-        auto g2r = from_grid_to_robot_matrix();
-        std::vector<Eigen::Vector2f> current_path_robot;
-        for(const auto &&[i, p]: iter::enumerate(current_path_grid))
-            current_path_robot.emplace_back((g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2));
+        // smooth the path with a spline
+        std::vector<Eigen::Vector2f> smoothed_current_path_grid = smooth_spline(current_path_grid);
+
+        // convert to robot coordinates
+        std::vector<Eigen::Vector2f> current_path_robot = convert_to_robot_coordinates(smoothed_current_path_grid, current_path_grid);
+
 
         //mpc
         //            if(current_path.size() < constants.num_steps_mpc)
@@ -195,20 +153,96 @@ void SpecificWorker::compute()
             //goto_target_mpc(path_robot_meters, ldata);
         //}
 
-        //carrot
-        auto [adv, rot, side] = carrot.update(current_path_robot);  // in robot coordinates
-        try
-        { differentialrobot_proxy->setSpeedBase(adv, rot); }
-        catch (const Ice::Exception &e) { std::cout << e.what() << " Error talking to differentialrobot" << std::endl; }
+        float advf=0.f, rotf=0.f, sidef=0.f;
 
-        draw_path(current_path_robot);
+        if(control == Control::DWA)
+        {
+            auto [adv, rot, side] = dwa.update(current_path_robot, ldata, 0.f, 0.f, robot_polygon, &viewer->scene);
+            advf = adv; rotf = rot; sidef = side;
+        }
+        if(control == Control::CARROT)
+        {
+            auto [adv, rot, side] = carrot.update(current_path_robot, robot_polygon, &viewer->scene);  // in robot coordinates
+            advf = adv; rotf = rot; sidef = side;
+        };
+
+        try
+        { differentialrobot_proxy->setSpeedBase(advf, rotf); }
+        catch (const Ice::Exception &e) { std::cout << e.what() << " Error talking to differentialrobot" << std::endl; }
     }
     else
         qInfo() << __FUNCTION__ << "IDLE";
     fps.print("FPS:");
 }
 
+
 /////////////////////////////////////////////////////////////////////////
+std::vector<Eigen::Vector2f> SpecificWorker::remove_points_close_to_robot(const std::vector<Eigen::Vector2f> &path_grid)
+{
+    std::vector<Eigen::Vector2f> temp_path(path_grid);
+    auto back = temp_path.back();
+    temp_path.pop_back();
+    std::erase_if(temp_path, [r = from_world_to_grid(robot_pose.pos)](auto p){ return (p-r).norm() < 300;});
+    temp_path.push_back(back);
+    return temp_path;
+}
+std::vector<Eigen::Vector2f> SpecificWorker::convert_to_robot_coordinates(const std::vector<Eigen::Vector2f> &smoothed_path_grid, const std::vector<Eigen::Vector2f> &path_grid)
+{
+    std::vector<Eigen::Vector2f> smoothed_path_robot;
+    auto g2r = from_grid_to_robot_matrix();
+    for (const auto &&[i, p]: iter::enumerate(smoothed_path_grid))
+        smoothed_path_robot.emplace_back((g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2));
+    draw_path_smooth(smoothed_path_robot);
+
+    std::vector<Eigen::Vector2f> path_to_draw;
+    for (const auto &&[i, p]: iter::enumerate(path_grid))
+        path_to_draw.emplace_back((g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2));
+    draw_path(path_to_draw);
+
+    return smoothed_path_robot;
+}
+std::vector<Eigen::Vector2f> SpecificWorker::alternative_path(const std::vector<Eigen::Vector2f> &path_grid)
+{
+    static std::chrono::steady_clock::time_point begin_clock = std::chrono::steady_clock::now();
+
+    std::chrono::steady_clock::time_point end_clock = std::chrono::steady_clock::now();
+    auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_clock - begin_clock).count();
+    std::vector<Eigen::Vector2f> temp_path;
+    if(elapsed_time > constants.period_to_check_occluded_path)
+    {
+        temp_path = grid.compute_path(e2q(from_world_to_grid(robot_pose.pos)), e2q(from_world_to_grid(target.to_eigen())));
+        if (path_length(temp_path) < path_length(path_grid) * 0.8)
+        {
+            begin_clock = std::chrono::steady_clock::now();
+            return temp_path;
+        }
+    }
+    return path_grid;
+}
+std::vector<Eigen::Vector2f> SpecificWorker::smooth_spline(const std::vector<Eigen::Vector2f> &path_grid)
+{
+    std::vector<Eigen::Vector2f> smoothed_path_robot;
+    unsigned int degree = 5;
+    float l = path_grid.size();
+    double s = l*l*l*l; // big number to force a loose approximation
+    if(path_grid.size() > degree )  // spline qDegreesToRadians
+    {
+        std::vector<float> x(path_grid.size()), y(path_grid.size());
+        for (const auto &[i, p]: path_grid | iter::enumerate)
+        {
+            x[i] = p.x();  y[i] = p.y();
+        }
+        py::tuple values = py::make_tuple(x, y);
+        py::tuple spline = interpolate_spline(values, nullptr, nullptr, 0, path_grid.size()-1, degree, 0, s);
+        py::object unew = np.attr("arange")(0, 1.1, 1.0/l);
+        py::tuple out = evaluate_spline(unew, spline[0]);
+        for(const auto &&[px, py]: iter::zip(out[0], out[1]))
+            smoothed_path_robot.emplace_back(Eigen::Vector2f(py::cast<float>(px), py::cast<float>(py)));
+    }
+    else
+        smoothed_path_robot.assign(path_grid.begin(), path_grid.end());
+    return smoothed_path_robot;
+}
 double SpecificWorker::path_length(const std::vector<Eigen::Vector2f> &path)
 {
     double total = 0.0;
@@ -252,46 +286,6 @@ void SpecificWorker::goto_target_mpc(const std::vector<Eigen::Vector2d> &path_ro
     }
 }
 
-void SpecificWorker::goto_target_carrot(const std::vector<Eigen::Vector2f> &path_robot)  //path in robot RS
-{
-    // lambda para unificar las dos salidas de los if
-    auto exit = [this]()
-                {
-                    try
-                    { differentialrobot_proxy->setSpeedBase(0, 0); }
-                    catch (const Ice::Exception &e)
-                    { std::cout << e.what() << std::endl; }
-                    target.active = false;
-                    qInfo() << __FUNCTION__ << "Target reached";
-                };
-
-    if (not path_robot.empty())
-    {
-        Eigen::Vector2f target_r;
-        if(path_robot.size() > 5)
-            target_r = path_robot[5];
-        else
-            target_r = path_robot.back();
-        float dist = target_r.norm();
-        if(dist > constants.min_dist_to_target)
-        {
-            float beta = atan2(target_r.x(), target_r.y());
-            float k2 = 1.f;
-            float f1 = std::clamp(dist / 1000, 0.f, 1.f);
-            float f2 = exp(-beta * beta);
-            try
-            { differentialrobot_proxy->setSpeedBase(1000 * f1 * f2, k2 * beta); }
-            catch (const Ice::Exception &e)
-            { std::cout << e.what() << std::endl; }
-        }
-        else exit();
-    }
-    else
-    {
-        exit();
-        return;
-    }
-}
 RoboCompLaser::TLaserData SpecificWorker::read_laser(bool noise)
 {
     static std::random_device rd;
@@ -469,7 +463,23 @@ void SpecificWorker::draw_path(const std::vector<Eigen::Vector2f> &path_in_robot
         path_paint.back()->setZValue(30);
     }
 }
+void SpecificWorker::draw_path_smooth(const std::vector<Eigen::Vector2f> &path_in_robot)
+{
+    static std::vector<QGraphicsItem *> path_paint;
+    static QString path_color = "Blue";
 
+    for(auto p : path_paint)
+        viewer->scene.removeItem(p);
+    path_paint.clear();
+
+    uint s = 100;
+    for(auto &&p : path_in_robot)
+    {
+        auto pw = from_robot_to_world(p);  // in mm
+        path_paint.push_back(viewer->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
+        path_paint.back()->setZValue(30);
+    }
+}
 void SpecificWorker::draw_laser(const RoboCompLaser::TLaserData &ldata) // robot coordinates
 {
     static QGraphicsItem *laser_polygon = nullptr;
@@ -557,54 +567,6 @@ void SpecificWorker::new_target_slot(QPointF t)
                     grid_world_pose.toQpointF(), grid_world_pose.ang);
     qInfo() << __FUNCTION__ << " Initial grid pos:" << grid_world_pose.pos.x() << grid_world_pose.pos.y() << grid_world_pose.ang;
 
-}
-std::vector<Eigen::Vector2f> SpecificWorker::bresenham(const Eigen::Vector2f &p1, const Eigen::Vector2f &p2)
-{
-    // Bresenham's line algorithm
-    std::vector<Eigen::Vector2f> res;
-    float x1 = p1.x();
-    float x2 = p2.x();
-    float y1 = p1.y();
-    float y2 = p2.y();
-
-    const bool steep = (fabs(y2 - y1) > fabs(x2 - x1));
-    if (steep)
-    {
-        std::swap(x1, y1);
-        std::swap(x2, y2);
-    }
-
-    if (x1 > x2)
-    {
-        std::swap(x1, x2);
-        std::swap(y1, y2);
-    }
-
-    const float dx = x2 - x1;
-    const float dy = fabs(y2 - y1);
-
-    float error = dx / 2.0f;
-    const int ystep = (y1 < y2) ? 1 : -1;
-    int y = (int) y1;
-
-    const int maxX = (int) x2;
-
-    for (int x = (int) x1; x <= maxX; x++)
-    {
-        if (steep)
-            res.emplace_back(Eigen::Vector2f(y, x));
-        else
-            res.emplace_back(Eigen::Vector2f(x, y));
-
-        error -= dy;
-        if (error < 0)
-        {
-            y += ystep;
-            error += dx;
-        }
-    }
-
-    return res;
 }
 void SpecificWorker::update_map(const RoboCompLaser::TLaserData &ldata)
 {

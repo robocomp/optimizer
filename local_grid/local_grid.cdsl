@@ -6,7 +6,6 @@ import "JointMotorSimple.idsl";
 import "FullPoseEstimation.idsl";
 import "BillCoppelia.idsl";
 
-
 Component local_grid
 {
     Communications
