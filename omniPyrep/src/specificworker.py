@@ -30,6 +30,23 @@ import itertools as it
 import numpy as np
 import numpy_indexed as npi
 
+class TimeControl:
+    def __init__(self, period_):
+        self.counter = 0
+        self.start = time.time()  # it doesn't exist yet, so initialize it
+        self.start_print = time.time()  # it doesn't exist yet, so initialize it
+        self.period = period_
+
+    def wait(self):
+        elapsed = time.time() - self.start
+        if elapsed < self.period:
+            time.sleep(self.period - elapsed)
+        self.start = time.time()
+        self.counter += 1
+        if time.time() - self.start_print > 1:
+            print("Giraff PyRep - Freq -> ", self.counter, "Hz")
+            self.counter = 0
+            self.start_print = time.time()
 
 class SpecificWorker(GenericWorker):
     def __init__(self, proxy_map):
@@ -40,8 +57,8 @@ class SpecificWorker(GenericWorker):
 
     def setParams(self, params):
         
-        #SCENE_FILE = '../etc/viriato_mpc.ttt'
-        SCENE_FILE = '../etc/viriato_dwa.ttt'
+        #SCENE_FILE = '../etc/omnirobot.ttt'
+        SCENE_FILE = '../etc/kuka.ttt'
 
         self.pr = PyRep()
         self.pr.launch(SCENE_FILE, headless=False)
@@ -58,10 +75,10 @@ class SpecificWorker(GenericWorker):
         self.ViriatoBase_Rotation_Factor = 8.1  # it should be (DistAxes + AxesLength) / 2
 
         # Each laser is composed of two cameras. They are converted into a 360 virtual laser
-        self.hokuyo_base_front_left = VisionSensor("hokuyo_base_front_left")
-        self.hokuyo_base_front_right = VisionSensor("hokuyo_base_front_right")
-        self.hokuyo_base_back_right = VisionSensor("hokuyo_base_back_right")
-        self.hokuyo_base_back_left = VisionSensor("hokuyo_base_back_left")
+        # self.hokuyo_base_front_left = VisionSensor("hokuyo_base_front_left")
+        # self.hokuyo_base_front_right = VisionSensor("hokuyo_base_front_right")
+        # self.hokuyo_base_back_right = VisionSensor("hokuyo_base_back_right")
+        # self.hokuyo_base_back_left = VisionSensor("hokuyo_base_back_left")
         self.ldata = []
 
         self.joystick_newdata = []
@@ -71,23 +88,16 @@ class SpecificWorker(GenericWorker):
 
     #@QtCore.Slot()
     def compute(self):
-        cont = 0
-        start = time.time()
+        tc = TimeControl(0.05)
         while True:
             self.pr.step()
-            self.ldata = self.read_laser()
+            #self.ldata = self.read_laser()
             self.read_joystick()
             self.read_robot_pose()
+            #self.speed_robot = [0, 4, 4]
             self.move_robot()
 
-            elapsed = time.time()-start
-            if elapsed < 0.05:
-                time.sleep(0.05-elapsed)
-            cont += 1
-            if elapsed > 1:
-                print("Freq -> ", cont)
-                cont = 0
-                start = time.time()
+            tc.wait()
 
     ###########################################
     ### LASER get and publish laser data
@@ -110,7 +120,23 @@ class SpecificWorker(GenericWorker):
     ###########################################
     def read_joystick(self):
         if self.joystick_newdata: #and (time.time() - self.joystick_newdata[1]) > 0.1:
-            self.update_joystick(self.joystick_newdata[0])
+            adv = 0.0
+            rot = 0.0
+            side = 0.0
+            datos = self.joystick_newdata[0]
+            # linear_vel, ang_vel = self.robot_object.get_velocity()
+            for x in datos.axes:
+                if x.name == "advance":
+                    adv = x.value if np.abs(x.value) > 0.1 else 0
+                if x.name == "rotate":
+                    rot = x.value if np.abs(x.value) > 0.1 else 0
+                    # rot = rot * ((self.ViriatoBase_DistAxes + self.ViriatoBase_AxesLength) / 2)
+                if x.name == "side":
+                    side = x.value if np.abs(x.value) > 0.1 else 0
+
+            print(adv, side, rot)
+            converted = self.convert_base_speed_to_radians(adv, side, rot)
+            self.robot.set_base_angular_velocites(converted)
             self.joystick_newdata = None
             self.last_received_data_time = time.time()
         else:
@@ -143,7 +169,6 @@ class SpecificWorker(GenericWorker):
     ### MOVE ROBOT from Omnirobot interface
     ###########################################
     def move_robot(self):
-
         if self.speed_robot != self.speed_robot_ant:  # or (isMoving and self.speed_robot == [0,0,0]):
             self.robot.set_base_angular_velocites(self.speed_robot)
         #print("Velocities sent to robot:", self.speed_robot)
@@ -235,7 +260,7 @@ class SpecificWorker(GenericWorker):
         #self.speed_robot = self.convert_base_speed_to_radians(adv, adv, rot)
         converted = self.convert_base_speed_to_radians(adv, side, rot)
         # print("Joystick ", converted)
-        self.robot.set_base_angular_velocites(converted)
+        #self.robot.set_base_angular_velocites(converted)
 
     def convert_base_speed_to_radians(self, adv, side, rot):
         # rot has to be neg so neg rot speeds go clock wise. It is probably a sign in Pyrep forward kinematics
