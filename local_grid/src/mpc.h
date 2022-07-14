@@ -35,7 +35,7 @@ namespace mpc
                 double max_advance_value = 0.9;           // max advance constraint in m/sg
                 double min_advance_value = 0;           // min advance constraint in m/sg
                 double xset_gaussian = 0.5;             // gaussian break x set value
-                double yset_gaussian = 0.6;             // gaussian break y set value
+                double yset_gaussian = 0.5;             // gaussian break y set value
                 double min_line_dist = 0.4;
                 float max_RDP_deviation = 70;
                 float laser_noise_sigma  = 15;
@@ -86,7 +86,8 @@ namespace mpc
 
             std::vector<double> e2v(const Eigen::Vector2d &v);
             Ball compute_free_ball(const Eigen::Vector2d &center, const std::vector<Eigen::Vector2d> &lpoints);
-            void draw_path(const std::vector<Eigen::Vector2f> &path_robot_meters, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene);
+            void draw_path(const std::vector<double> &path_robot_meters, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene);
+            float gaussian(float x);
     };
 
 } // mpc

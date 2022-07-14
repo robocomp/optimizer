@@ -23,6 +23,7 @@
 #include <cppitertools/chunked.hpp>
 #include <cppitertools/sliding_window.hpp>
 #include <cppitertools/zip.hpp>
+#include <cppitertools/filter.hpp>
 
 /**
 * \brief Default constructor
@@ -107,6 +108,7 @@ void SpecificWorker::compute()
     static std::vector<Eigen::Vector2f> current_path_grid;
     auto ldata = read_laser(true);
     robot_pose = read_robot();
+    update_map(ldata);
 
     // Bill
     //read_bill(robot_pose);  // sets target at 1m from Bill
@@ -148,12 +150,12 @@ void SpecificWorker::compute()
 
         // convert to robot coordinates
         std::vector<Eigen::Vector2f> current_path_robot = convert_to_robot_coordinates(smoothed_current_path_grid, current_path_grid);
+        draw_path_smooth(current_path_robot);
 
         float advf=0.f, rotf=0.f, sidef=0.f;
 
         if(control == Control::MPC)
         {
-            //auto [adv, rot, side] = mpc.update(current_path_robot, robot_polygon, &viewer->scene);
             auto [adv, rot, side]  = mpc.update(current_path_robot, robot_polygon, &viewer->scene);
             advf = adv; rotf = rot; sidef = side;
         }
@@ -180,7 +182,6 @@ void SpecificWorker::compute()
     fps.print("FPS:");
 }
 
-
 /////////////////////////////////////////////////////////////////////////
 std::vector<Eigen::Vector2f> SpecificWorker::remove_points_close_to_robot(const std::vector<Eigen::Vector2f> &path_grid)
 {
@@ -197,12 +198,11 @@ std::vector<Eigen::Vector2f> SpecificWorker::convert_to_robot_coordinates(const 
     auto g2r = from_grid_to_robot_matrix();
     for (const auto &&[i, p]: iter::enumerate(smoothed_path_grid))
         smoothed_path_robot.emplace_back((g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2));
-    draw_path_smooth(smoothed_path_robot);
 
     std::vector<Eigen::Vector2f> path_to_draw;
     for (const auto &&[i, p]: iter::enumerate(path_grid))
         path_to_draw.emplace_back((g2r * Eigen::Vector3f(p.x(), p.y(), 1.f)).head(2));
-    draw_path(path_to_draw);
+    //draw_path(path_to_draw);
 
     return smoothed_path_robot;
 }
@@ -317,8 +317,6 @@ RoboCompLaser::TLaserData SpecificWorker::read_laser(bool noise)
                 ldata[s].dist /= 3;
 
         draw_laser( ldata );
-        //if(target.active)
-            update_map(ldata);
     }
     catch(const Ice::Exception &e){ std::cout << e.what() << std::endl;}
     return ldata;
@@ -590,28 +588,6 @@ void SpecificWorker::update_map(const RoboCompLaser::TLaserData &ldata)
     // transform laser data to grid coordinates
     Eigen::Matrix3f r2g = from_robot_to_grid_matrix();
     Eigen::Vector2f robot_in_grid = from_world_to_grid(Eigen::Vector2f(robot_pose.pos.x(), robot_pose.pos.y()));
-//    for(const auto &l : ldata)
-//    {
-//        if(l.dist > constants.robot_semi_length)
-//        {
-//            // transform tip form robot's RS to local_grid RS
-//            Eigen::Vector2f tip = (r2g * Eigen::Vector3f(l.dist*sin(l.angle), l.dist*cos(l.angle), 1.f)).head(2);
-//            Eigen::Vector2f tip_in_grid = grid.pointToGrid(tip);
-//
-//            int num_steps = ceil(l.dist/(constants.tile_size));
-//            Eigen::Vector2f p;
-//            for(const auto &&step : iter::range(0.0, 1.0-(1.0/num_steps), 1.0/num_steps))
-//            {
-//                p = robot_in_grid * (1-step) + tip*step;
-//                grid.add_miss(p);
-//            }
-//            if(l.dist <= constants.max_laser_range)
-//                grid.add_hit(tip);
-//
-//            if((p-tip).norm() < constants.tile_size)  // in case last miss overlaps tip
-//                grid.add_hit(tip);
-//        }
-//    }
     std::vector<Eigen::Vector2f> points;
     std::ranges::transform(ldata, std::back_inserter(points), [r2g](auto l) -> Eigen::Vector2f { return (r2g * Eigen::Vector3f(l.dist*sin(l.angle), l.dist*cos(l.angle), 1.f)).head(2);});
     grid.update_map(points, robot_in_grid, constants.max_laser_range);

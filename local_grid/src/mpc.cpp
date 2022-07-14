@@ -5,6 +5,7 @@
 #include "mpc.h"
 #include <cppitertools/range.hpp>
 #include <cppitertools/enumerate.hpp>
+#include <cppitertools/chunked.hpp>
 #include <QGraphicsScene>
 #include <QPen>
 #include <QBrush>
@@ -246,12 +247,12 @@ namespace mpc
             path_robot_meters[i] = p / 1000.f;
 
         // target in robot RS in meters
-        auto target_robot = path_robot_meters.at(consts.num_steps-1);
+        auto target_robot = path_robot_meters.back();
 
         if(path_robot.size() < consts.num_steps)
         {
-            float adv = std::clamp(target_robot.norm(), 0.f, 500.f);
-            float rot = atan2(target_robot.x(), target_robot.y());
+            float adv = std::clamp(path_robot.back().norm(), 0.f, 500.f);
+            float rot = atan2(path_robot.back().x(), path_robot.back().y());
             return std::make_tuple(adv, rot, 0.f);
         }
 
@@ -276,7 +277,9 @@ namespace mpc
         double alfa = 1.1;
         auto sum_dist_target = opti_local.parameter();
         opti_local.set_value(sum_dist_target, 0.0);
+        //target
         auto t = e2v(target_robot.cast<double>());
+
         for (auto k: iter::range(consts.num_steps+1))
             sum_dist_target += pow(alfa,k) * casadi::MX::sumsqr(pos(all, k) - t);
 
@@ -304,7 +307,7 @@ namespace mpc
 //                             casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
 //                             casadi::MX::dot(slack_vector, mu_vector));
 
-        opti_local.minimize( sum_dist_path  + casadi::MX::sumsqr(pos(all, consts.num_steps) - t));
+        opti_local.minimize( sum_dist_path  + casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot);
 
         // solve NLP ------
         try
@@ -328,11 +331,12 @@ namespace mpc
             auto advance = std::vector<double>(solution.value(adv)).at(1) * 1000;
             auto rotation = std::vector<double>(solution.value(rot)).at(1);
 
-            //qInfo() << std::vector<double>(solution.value(rot));
+            if(scene != nullptr) draw_path(std::vector<double>(solution.value(state)), robot_polygon, scene);
+
             qInfo() << __FUNCTION__ << "Iterations:" << (int) solution.stats()["iter_count"];
             qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
-            if(scene != nullptr) draw_path(path_robot_meters, robot_polygon, scene);
 
+            advance = advance * gaussian(rotation);
             return std::make_tuple(advance, rotation, 0.f);
         }
         catch (...)
@@ -344,23 +348,31 @@ namespace mpc
         }
     }
     ////////////////////// AUX /////////////////////////////////////////////////
+    float MPC::gaussian(float x)
+    {
+        const double xset = consts.xset_gaussian;
+        const double yset = consts.yset_gaussian;
+        const double s = -xset*xset/log(yset);
+        return exp(-x*x/s);
+    }
     std::vector<double> MPC::e2v(const Eigen::Vector2d &v)
     {
         return std::vector<double>{v.x(), v.y()};
     }
-    void MPC::draw_path(const std::vector<Eigen::Vector2f> &path_robot_meters, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
+    void MPC::draw_path(const std::vector<double> &path_robot_meters, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
     {
+        // draw optimum N points solution
         static std::vector<QGraphicsItem *> path_paint;
-        static QString path_color = "Green";
+        static QString path_color = "orange";
 
         for(auto p : path_paint)
             scene->removeItem(p);
         path_paint.clear();
 
         uint s = 100;
-        for(auto &&p : path_robot_meters)
+        for(auto &&p : path_robot_meters | iter::chunked(3))
         {
-            auto pw = robot_polygon->mapToScene(QPointF(p.x(), p.y()));
+            auto pw = robot_polygon->mapToScene(QPointF(p[0]*1000.f, p[1]*1000.f));
             path_paint.push_back(scene->addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
             path_paint.back()->setZValue(30);
         }
