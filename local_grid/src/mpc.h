@@ -32,7 +32,7 @@ namespace mpc
                 double gauss_value_for_point = 0.3;     // minimun distance to a corner gaussian as constraint
                 float min_dist_to_target = 0.9;         // min distance to target at which the robot stops
                 double max_rotation_value = 0.5;        // max rotation constraint in rads/sg
-                double max_advance_value = 0.9;           // max advance constraint in m/sg
+                double max_advance_value = 2;           // max advance constraint in m/sg
                 double min_advance_value = 0;           // min advance constraint in m/sg
                 double xset_gaussian = 0.5;             // gaussian break x set value
                 double yset_gaussian = 0.5;             // gaussian break y set value
@@ -67,7 +67,7 @@ namespace mpc
 
             casadi::Opti initialize_differential(const int N);
             Result minimize_balls_path( const std::vector<Eigen::Vector2d> &path, const Eigen::Vector3d &current_pose_meters, const RoboCompLaser::TLaserData &ldata);
-            std::tuple<float, float, float> update( const std::vector<Eigen::Vector2f> &path, QGraphicsPolygonItem *robot_polygon = nullptr,
+            std::tuple<float, float, float> update( std::vector<Eigen::Vector2f> near_obstacles, const std::vector<Eigen::Vector2f> &path, QGraphicsPolygonItem *robot_polygon = nullptr,
                                                     QGraphicsScene *scene = nullptr);
             casadi::MX pos;
             casadi::MX rot;

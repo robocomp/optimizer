@@ -36,6 +36,8 @@ namespace mpc
         // ---- inputs variables 2 adv and rot---------
         control = opti.variable(2, N);
         adv = control(0, all);
+        // std::cout<<adv.size()<<std::endl;
+        // exit(0);
         rot = control(1, all);
 
         // Gap closing: dynamic constraints for differential robot: dx/dt = f(x, u)   3 x 2 * 2 x 1 -> 3 x 1
@@ -55,6 +57,14 @@ namespace mpc
             auto x_next = state(all, k) + dt / 6 * (k1 + 2*k2 + 2*k3 + k4);
             //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
             opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
+        }
+        for(const auto k : iter::range(N-1))  // acceeleration constraints
+        {
+            auto v1 = control(0,k);
+            auto v2 = control(0,k+1);
+            auto acc = (v2-v1)/dt;
+            //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
+            opti.subject_to(opti.bounded(-3.19, acc, 3.19)); 
         }
 
         // control constraints -----------
@@ -237,9 +247,14 @@ namespace mpc
         return std::make_tuple(new_center, current_dist, grad(new_center));
     }
 
-    std::tuple<float, float, float> MPC::update( const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
+    std::tuple<float, float, float> MPC::update( std::vector<Eigen::Vector2f> near_obstacles, const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
     {
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        
+        // std::cout<<"#################################"<<std::endl;
+        // std::cout<<near_obstacles[0]<<std::endl;
+        // std::cout<<"#################################"<<std::endl;
+        // exit(0);
 
         // transform path to meters
         std::vector<Eigen::Vector2f> path_robot_meters(path_robot.size());
