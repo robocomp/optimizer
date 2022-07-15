@@ -109,6 +109,16 @@ void SpecificWorker::compute()
     auto ldata = read_laser(true);
     robot_pose = read_robot();
     update_map(ldata);
+    std::vector<Eigen::Vector2f> near_obstacles;
+    for(const auto &[key, value] : grid)
+    {
+        if(not value.free and (Eigen::Vector2f(key.x, key.z) - from_world_to_grid(robot_pose.pos)).norm() <= 5000)
+        {
+            near_obstacles.push_back(Eigen::Vector2f(key.x, key.z));
+        }
+    
+    }
+
 
     // Bill
     //read_bill(robot_pose);  // sets target at 1m from Bill
@@ -156,7 +166,7 @@ void SpecificWorker::compute()
 
         if(control == Control::MPC)
         {
-            auto [adv, rot, side]  = mpc.update(current_path_robot, robot_polygon, &viewer->scene);
+            auto [adv, rot, side]  = mpc.update(near_obstacles, current_path_robot, robot_polygon, &viewer->scene);
             advf = adv; rotf = rot; sidef = side;
         }
         if(control == Control::DWA)
