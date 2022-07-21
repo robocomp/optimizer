@@ -82,7 +82,7 @@ class SpecificWorker : public GenericWorker
             float robot_length = 500;
             const float robot_semi_length = robot_length/2.0;
             const float final_distance_to_target = 700; //mm
-            const float max_dist_to_target = 200; //mm
+            const float max_dist_to_target = 600; //mm
             float lidar_noise_sigma  = 20;
             const int num_lidar_affected_rays_by_hard_noise = 2;
             double xset_gaussian = 0.4;             // gaussian break x set value

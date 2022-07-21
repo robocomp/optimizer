@@ -58,7 +58,7 @@ namespace mpc
             //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
             opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
         }
-        for(const auto k : iter::range(N-1))  // acceeleration constraints
+        for(const auto k : iter::range(N-1))  // acceleration constraints
         {
             auto v1 = control(0,k);
             auto v2 = control(0,k+1);
@@ -251,11 +251,14 @@ namespace mpc
     {
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         
+        
         // std::cout<<"#################################"<<std::endl;
-        // std::cout<<near_obstacles[0]<<std::endl;
+        // std::cout<<state(0,0)<<std::endl;
+        // std::cout<<state(1,0)<<std::endl;
+        // // std::cout<<near_obstacles[0]<<std::endl;
         // std::cout<<"#################################"<<std::endl;
         // exit(0);
-
+// 
         // transform path to meters
         std::vector<Eigen::Vector2f> path_robot_meters(path_robot.size());
         for(const auto &[i, p] : path_robot | iter::enumerate)
@@ -266,6 +269,7 @@ namespace mpc
 
         if(path_robot.size() < consts.num_steps)
         {
+            // std::cout<<"TEST"<<std::endl;
             float adv = std::clamp(path_robot.back().norm(), 0.f, 500.f);
             float rot = atan2(path_robot.back().x(), path_robot.back().y());
             return std::make_tuple(adv, rot, 0.f);
@@ -273,6 +277,22 @@ namespace mpc
 
         auto opti_local = this->opti.copy();
         casadi::Slice all;
+
+        for (auto k: iter::range(near_obstacles.size()))
+        {
+            for (auto i: iter::range(consts.num_steps)) // obstacle avoidance constraints
+            {
+                
+                auto dist = casadi::MX::sqrt(casadi::MX::pow((state(0,i) - near_obstacles[k][0]),2) + casadi::MX::pow((state(1,i) - near_obstacles[k][1]),2));
+                // std::cout<<dist<<std::endl;
+                // exit(0);
+                // double r = consts.robot_radius/1000.f;
+                // casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - e2v(near_obstacles[k]));
+                opti_local.subject_to(dist >= (300 + 80) );
+                // balls.push_back(ball);
+            }
+        }
+
 
         // Warm start
         if (previous_values_of_solution.empty())
@@ -308,7 +328,7 @@ namespace mpc
         // minimze distance to each element of path
         auto sum_dist_path = opti_local.parameter();
         opti_local.set_value(sum_dist_path, 0.0);
-        for (auto k: iter::range(consts.num_steps))
+        for (auto k: iter::range(consts.num_steps-4))
             sum_dist_path += casadi::MX::sumsqr(pos(all, k) - e2v(path_robot_meters[k].cast<double>()));
 
         // minimze sum of rotations
@@ -322,7 +342,9 @@ namespace mpc
 //                             casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
 //                             casadi::MX::dot(slack_vector, mu_vector));
 
-        opti_local.minimize( sum_dist_path  + casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot);
+
+        
+        opti_local.minimize( sum_dist_path  + 0*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.5*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
 
         // solve NLP ------
         try
