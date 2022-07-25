@@ -112,12 +112,14 @@ void SpecificWorker::compute()
     std::vector<Eigen::Vector2f> near_obstacles;
     for(const auto &[key, value] : grid)
     {
-        if(not value.free and (Eigen::Vector2f(key.x, key.z) - from_world_to_grid(robot_pose.pos)).norm() <= 5000)
+        if(not value.free and (Eigen::Vector2f(key.x, key.z) - from_world_to_grid(robot_pose.pos)).norm() <= 7000)
         {
             near_obstacles.push_back(Eigen::Vector2f(key.x, key.z));
         }
     
     }
+
+    
 
 
     // Bill
@@ -128,6 +130,20 @@ void SpecificWorker::compute()
     if(target.active)
     {
         auto target_r = from_world_to_robot(target.to_eigen());
+        // if(target_r[1]<0) //current_path_robot[5][1]<0)
+        // {
+        //     move_robot(0,0.5);
+        //     // target_r = from_world_to_robot(target.to_eigen());
+        // }
+        // std::cout<<target_r[0]<<std::endl;
+        // std::cout<<target_r[1]<<std::endl;
+        // if(target_r[0]<0 or target_r[1]<0)
+        // {
+        //     move_robot(0,0.25);
+        //     // target_r = from_world_to_robot(target.to_eigen());
+        // }
+        // move_robot(0,0);
+        // exit(0);
         qInfo() << __FUNCTION__ << "Dist to target:" << target_r.norm();
         if(target_r.norm() < constants.max_dist_to_target)
         {
@@ -161,9 +177,31 @@ void SpecificWorker::compute()
         // convert to robot coordinates
         std::vector<Eigen::Vector2f> current_path_robot = convert_to_robot_coordinates(smoothed_current_path_grid, current_path_grid);
         draw_path_smooth(current_path_robot);
+        // std::cout<<current_path_robot[0]<<std::endl;
+        std::cout<<"####################################"<<std::endl;
+        std::cout<<current_path_robot[3][0]<<std::endl;
+        std::cout<<current_path_robot[3][1]<<std::endl;
+        // // std::cout<<current_path_robot[1,0]<<std::endl;
+        // exit(0);
+
+        // if(current_path_robot[3][1]<0) //current_path_robot[5][1]<0)
+        // {
+        //     std::cout<<"Test"<<std::endl;
+        //     move_robot(0,0.5);
+        //     // target_r = from_world_to_robot(target.to_eigen());
+        // }
 
         float advf=0.f, rotf=0.f, sidef=0.f;
-
+        if(current_path_robot[3][1]<0) //current_path_robot[5][1]<0)
+        {
+            std::cout<<"Test"<<std::endl;
+            advf = 0;
+            rotf = 0.99;
+            // move_robot(0,0.5);
+            // target_r = from_world_to_robot(target.to_eigen());
+        }
+        if(current_path_robot[3][1]>=0)
+        {
         if(control == Control::MPC)
         {
             auto [adv, rot, side]  = mpc.update(near_obstacles, current_path_robot, robot_polygon, &viewer->scene);
@@ -179,6 +217,7 @@ void SpecificWorker::compute()
             auto [adv, rot, side] = carrot.update(current_path_robot, robot_polygon, &viewer->scene);  // in robot coordinates
             advf = adv; rotf = rot; sidef = side;
         };
+        }
 
         try
         { differentialrobot_proxy->setSpeedBase(advf, rotf); }
