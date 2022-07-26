@@ -262,7 +262,11 @@ namespace mpc
         // transform path to meters
         std::vector<Eigen::Vector2f> path_robot_meters(path_robot.size());
         for(const auto &[i, p] : path_robot | iter::enumerate)
+        {
             path_robot_meters[i] = p / 1000.f;
+
+        }
+        
 
         // target in robot RS in meters
         auto target_robot = path_robot_meters.back();
@@ -280,16 +284,12 @@ namespace mpc
 
         for (auto k: iter::range(near_obstacles.size()))
         {
+
             for (auto i: iter::range(consts.num_steps)) // obstacle avoidance constraints
             {
-                
-                auto dist = casadi::MX::sqrt(casadi::MX::pow((state(0,i) - near_obstacles[k][0]),2) + casadi::MX::pow((state(1,i) - near_obstacles[k][1]),2));
-                // std::cout<<dist<<std::endl;
-                // exit(0);
-                // double r = consts.robot_radius/1000.f;
-                // casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - e2v(near_obstacles[k]));
-                opti_local.subject_to(dist >= (300 + 75) );
-                // balls.push_back(ball);
+                // auto dist = sqrt( pow((state(0,i) - near_obstacles[k][0]),2) + pow((state(1,i) - near_obstacles[k][1]),2) );
+                opti_local.subject_to(casadi::MX::sqrt( casadi::MX::pow((pos(0,i) - near_obstacles[k][0]/1000.f),2) + casadi::MX::pow((pos(1,i) - near_obstacles[k][1]/1000.f),2) ) >= (.600 + .075) );
+
             }
         }
 
@@ -326,6 +326,7 @@ namespace mpc
 //            sum_dist_local += pow(beta,k) * casadi::MX::sumsqr(state(all, k-1) - state(all, k));
 
         // minimze distance to each element of path
+        double beta = 0.99;
         auto sum_dist_path = opti_local.parameter();
         opti_local.set_value(sum_dist_path, 0.0);
         for (auto k: iter::range(consts.num_steps-4))
@@ -344,7 +345,7 @@ namespace mpc
 
 
         
-        opti_local.minimize( sum_dist_path  + 0*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
+        opti_local.minimize( sum_dist_path  + 0*sum_dist_target + 0.0*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
 
         // solve NLP ------
         try

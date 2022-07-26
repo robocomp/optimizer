@@ -109,15 +109,20 @@ void SpecificWorker::compute()
     auto ldata = read_laser(true);
     robot_pose = read_robot();
     update_map(ldata);
+
     std::vector<Eigen::Vector2f> near_obstacles;
+    auto g2r = from_grid_to_robot_matrix();
+    // std::cout<<g2r.rows()<<std::endl;
+    // std::cout<<g2r.cols()<<std::endl;
     for(const auto &[key, value] : grid)
     {
-        if(not value.free and (Eigen::Vector2f(key.x, key.z) - from_world_to_grid(robot_pose.pos)).norm() <= 7000)
+        if(not value.free and (g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2).norm() <=2000)// from_world_to_robot(Eigen::Vector2f(key.x, key.z)).norm() <= 1000)
         {
-            near_obstacles.push_back(Eigen::Vector2f(key.x, key.z));
+            near_obstacles.push_back((g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2));
         }
     
     }
+    std::cout<<near_obstacles.size()<<std::endl;
 
     
 
@@ -177,25 +182,12 @@ void SpecificWorker::compute()
         // convert to robot coordinates
         std::vector<Eigen::Vector2f> current_path_robot = convert_to_robot_coordinates(smoothed_current_path_grid, current_path_grid);
         draw_path_smooth(current_path_robot);
-        // std::cout<<current_path_robot[0]<<std::endl;
-        std::cout<<"####################################"<<std::endl;
-        std::cout<<current_path_robot[3][0]<<std::endl;
-        std::cout<<current_path_robot[3][1]<<std::endl;
-        // // std::cout<<current_path_robot[1,0]<<std::endl;
-        // exit(0);
-
-        // if(current_path_robot[3][1]<0) //current_path_robot[5][1]<0)
-        // {
-        //     std::cout<<"Test"<<std::endl;
-        //     move_robot(0,0.5);
-        //     // target_r = from_world_to_robot(target.to_eigen());
-        // }
 
         float advf=0.f, rotf=0.f, sidef=0.f;
-        if(current_path_robot[3][1]<0) //current_path_robot[5][1]<0)
+        if(target_r[1]<0) //current_path_robot[5][1]<0)
         {
             std::cout<<"Test"<<std::endl;
-            advf = 0;
+            // advf = 0;
             rotf = 0.99;
             // move_robot(0,0.5);
             // target_r = from_world_to_robot(target.to_eigen());
