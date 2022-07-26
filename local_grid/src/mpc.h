@@ -33,7 +33,7 @@ namespace mpc
                 float min_dist_to_target = 0.9;         // min distance to target at which the robot stops
                 double max_rotation_value = 0.5;        // max rotation constraint in rads/sg
                 double max_advance_value = 0.9;           // max advance constraint in m/sg
-                double min_advance_value = -0.2;           // min advance constraint in m/sg
+                double min_advance_value = 0;           // min advance constraint in m/sg
                 double xset_gaussian = 0.5;             // gaussian break x set value
                 double yset_gaussian = 0.5;             // gaussian break y set value
                 double min_line_dist = 0.4;

@@ -288,7 +288,7 @@ namespace mpc
                 // exit(0);
                 // double r = consts.robot_radius/1000.f;
                 // casadi::MX dist = casadi::MX::sumsqr(pos(all, i) - e2v(near_obstacles[k]));
-                opti_local.subject_to(dist >= (300 + 80) );
+                opti_local.subject_to(dist >= (300 + 75) );
                 // balls.push_back(ball);
             }
         }
@@ -344,7 +344,7 @@ namespace mpc
 
 
         
-        opti_local.minimize( sum_dist_path  + 0*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.5*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
+        opti_local.minimize( sum_dist_path  + 0*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
 
         // solve NLP ------
         try
