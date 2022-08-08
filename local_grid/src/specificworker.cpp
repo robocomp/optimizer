@@ -116,16 +116,13 @@ void SpecificWorker::compute()
     // std::cout<<g2r.cols()<<std::endl;
     for(const auto &[key, value] : grid)
     {
-        if(not value.free and (g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2).norm() <=2000)// from_world_to_robot(Eigen::Vector2f(key.x, key.z)).norm() <= 1000)
+        if(not value.free and (g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2).norm() <=1000)// from_world_to_robot(Eigen::Vector2f(key.x, key.z)).norm() <= 1000)
         {
             near_obstacles.push_back((g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2));
         }
     
     }
-    std::cout<<near_obstacles.size()<<std::endl;
-
-    
-
+    std::cout<<"Number of obstacles: "<<near_obstacles.size()<<std::endl;    
 
     // Bill
     //read_bill(robot_pose);  // sets target at 1m from Bill
@@ -135,20 +132,7 @@ void SpecificWorker::compute()
     if(target.active)
     {
         auto target_r = from_world_to_robot(target.to_eigen());
-        // if(target_r[1]<0) //current_path_robot[5][1]<0)
-        // {
-        //     move_robot(0,0.5);
-        //     // target_r = from_world_to_robot(target.to_eigen());
-        // }
-        // std::cout<<target_r[0]<<std::endl;
-        // std::cout<<target_r[1]<<std::endl;
-        // if(target_r[0]<0 or target_r[1]<0)
-        // {
-        //     move_robot(0,0.25);
-        //     // target_r = from_world_to_robot(target.to_eigen());
-        // }
-        // move_robot(0,0);
-        // exit(0);
+        
         qInfo() << __FUNCTION__ << "Dist to target:" << target_r.norm();
         if(target_r.norm() < constants.max_dist_to_target)
         {
@@ -184,9 +168,9 @@ void SpecificWorker::compute()
         draw_path_smooth(current_path_robot);
 
         float advf=0.f, rotf=0.f, sidef=0.f;
-        if(target_r[1]<0) //current_path_robot[5][1]<0)
+        if(current_path_robot[5][1]<0) //current_path_robot[5][1]<0)
         {
-            std::cout<<"Test"<<std::endl;
+            // std::cout<<"Test"<<std::endl;
             // advf = 0;
             rotf = 0.99;
             // move_robot(0,0.5);

@@ -288,7 +288,7 @@ namespace mpc
             for (auto i: iter::range(consts.num_steps)) // obstacle avoidance constraints
             {
                 // auto dist = sqrt( pow((state(0,i) - near_obstacles[k][0]),2) + pow((state(1,i) - near_obstacles[k][1]),2) );
-                opti_local.subject_to(casadi::MX::sqrt( casadi::MX::pow((pos(0,i) - near_obstacles[k][0]/1000.f),2) + casadi::MX::pow((pos(1,i) - near_obstacles[k][1]/1000.f),2) ) >= (.600 + .075) );
+                opti_local.subject_to(casadi::MX::sqrt( casadi::MX::pow((pos(0,i) - near_obstacles[k][0]/1000.f),2) + casadi::MX::pow((pos(1,i) - near_obstacles[k][1]/1000.f),2) ) >= (.650 + .075) );
 
             }
         }
@@ -345,7 +345,7 @@ namespace mpc
 
 
         
-        opti_local.minimize( sum_dist_path  + 0*sum_dist_target + 0.0*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
+        opti_local.minimize( sum_dist_path  + 0*sum_dist_target + 0.01*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
 
         // solve NLP ------
         try
