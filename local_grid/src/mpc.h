@@ -24,7 +24,7 @@ namespace mpc
 
             struct Constants
             {
-                unsigned int num_steps = 10;                     // MPC steps ahead
+                unsigned int num_steps = 8;                     // MPC steps ahead
                 const float robot_radius = 300;
                 double gauss_dist = 0.1;                // minimun distance to a lidar-gaussian as constraint
                 double point_dist = 0.2;                // value in lidar-gaussian at lidar points (corners)
@@ -32,7 +32,7 @@ namespace mpc
                 double gauss_value_for_point = 0.3;     // minimun distance to a corner gaussian as constraint
                 float min_dist_to_target = 0.9;         // min distance to target at which the robot stops
                 double max_rotation_value = 0.5;        // max rotation constraint in rads/sg
-                double max_advance_value = 0.9;           // max advance constraint in m/sg
+                double max_advance_value = 0.5;           // max advance constraint in m/sg
                 double min_advance_value = 0;           // min advance constraint in m/sg
                 double xset_gaussian = 0.5;             // gaussian break x set value
                 double yset_gaussian = 0.5;             // gaussian break y set value
