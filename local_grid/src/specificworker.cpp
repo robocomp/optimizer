@@ -165,6 +165,16 @@ void SpecificWorker::compute()
 
         // convert to robot coordinates
         std::vector<Eigen::Vector2f> current_path_robot = convert_to_robot_coordinates(smoothed_current_path_grid, current_path_grid);
+        // std::vector<Eigen::Vector2d> current_path_robot_double(current_path_robot.begin(), current_path_robot.end());
+        std::vector<Eigen::Vector2d> current_path_robot_double; // = current_path_robot.cast<double>();
+        std::cout<<current_path_robot.size()<<std::endl;
+        for (auto i: iter::range(current_path_robot.size()))
+        {
+            // std::cout<<"---------------------------------"<<std::endl;
+            current_path_robot_double.push_back(current_path_robot[i].cast<double>());
+
+        }
+        // exit(0);
         draw_path_smooth(current_path_robot);
 
         float advf=0.f, rotf=0.f, sidef=0.f;
@@ -182,6 +192,7 @@ void SpecificWorker::compute()
         {
             auto [adv, rot, side]  = mpc.update(near_obstacles, current_path_robot, robot_polygon, &viewer->scene);
             advf = adv; rotf = rot; sidef = side;
+            // goto_target_mpc(current_path_robot_double, ldata);
         }
         if(control == Control::DWA)
         {
@@ -283,21 +294,27 @@ double SpecificWorker::path_length(const std::vector<Eigen::Vector2f> &path)
 void SpecificWorker::goto_target_mpc(const std::vector<Eigen::Vector2d> &path_robot, const RoboCompLaser::TLaserData &ldata)  //path in robot RS
 {
     // lambda para unificar las dos salidas de los if
-    auto exit = [this, path_robot]()
-    {
-            try
-            { differentialrobot_proxy->setSpeedBase(0, 0); }
-            catch (const Ice::Exception &e)
-            { std::cout << e.what() << std::endl; }
-            target.active = false;
-            qInfo() << __FUNCTION__ << "Target reached";
-    };
+    std::cout<<"1"<<std::endl;
+    
+    // auto exit = [this, path_robot]()
+    // {
+    //         std::cout<<"I am in exit"<<std::endl;
+    //         try
+    //         { differentialrobot_proxy->setSpeedBase(0, 0); }
+    //         catch (const Ice::Exception &e)
+    //         { std::cout << e.what() << std::endl; }
+    //         target.active = false;
+    //         qInfo() << __FUNCTION__ << "Target reached";
+    // };
 
     if(auto r = mpc.minimize_balls_path(path_robot, robot_pose.to_vec3_meters(), ldata); r.has_value())
     {
+        std::cout<<"1.1"<<std::endl;
+        
         auto [advance, rotation, solution, balls] = r.value();
         try
         {
+            std::cout<<"I am in minimize_balls_path"<<std::endl;
             // move the robot
             move_robot(advance * gaussian(rotation), rotation);
             qInfo() << __FUNCTION__ << "Adv: " << advance << "Rot:" << rotation;

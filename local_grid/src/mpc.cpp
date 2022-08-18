@@ -58,14 +58,14 @@ namespace mpc
             //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
             opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
         }
-        for(const auto k : iter::range(N-1))  // acceleration constraints
-        {
-            auto v1 = control(0,k);
-            auto v2 = control(0,k+1);
-            auto acc = (v2-v1)/dt;
-            //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
-            opti.subject_to(opti.bounded(-3.19, acc, 3.19)); 
-        }
+        // for(const auto k : iter::range(N-1))  // acceleration constraints
+        // {
+        //     auto v1 = control(0,k);
+        //     auto v2 = control(0,k+1);
+        //     auto acc = (v2-v1)/dt;
+        //     //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
+        //     opti.subject_to(opti.bounded(-3.19, acc, 3.19)); 
+        // }
 
         // control constraints -----------
         opti.subject_to(opti.bounded(consts.min_advance_value, adv, consts.max_advance_value));  // control is limited meters
@@ -95,11 +95,15 @@ namespace mpc
 
         // target in robot RS
         auto target_robot = path.at(consts.num_steps-1);
+        std::cout<<"2"<<std::endl;
 
         // Warm start
         if (previous_values_of_solution.empty())
         {
+            std::cout<<"3"<<std::endl;
+
             previous_values_of_solution.resize(consts.num_steps+1);
+            std::cout<<"4"<<std::endl;
             double landa = 1.0 / (target_robot.norm() / consts.num_steps);
             for (auto &&[i, step]: iter::range(0.0, 1.0, landa) | iter::enumerate)
             {
@@ -107,13 +111,24 @@ namespace mpc
                 previous_values_of_solution[3 * i] = paso.x();
                 previous_values_of_solution[3 * i + 1] = paso.y();
                 previous_values_of_solution[3 * i + 2] = 0.0;
+               
             }
-        }
+            std::cout<<"5"<<std::endl;
+        } 
+        
+
 
         // initialize slack variables
-        static std::vector<double> mu_vector(consts.num_steps, 0.2);
+        std::cout<<"6"<<std::endl;
+        
+        std::vector<double> mu_vector(consts.num_steps, 1.0);
+        std::cout<<"7"<<std::endl;
+        std::cout<<"mu_vector size: "<<mu_vector.size()<<std::endl;
+        // exit(0);
         std::vector<double> slack_init(consts.num_steps, 0.1);
-        opti.set_initial(slack_vector, slack_init);
+        std::cout<<"8"<<std::endl;
+        opti_local.set_initial(slack_vector, slack_init);
+        
 
         // add free balls constraints
         std::vector<Eigen::Vector2d> lpoints(ldata.size());
@@ -123,9 +138,9 @@ namespace mpc
         balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25, Eigen::Vector2d(0.2, 0.3)});  // first point on robot
         for (auto i: iter::range(0u, consts.num_steps))
         {
-            opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
-                                                                      previous_values_of_solution[3 * i + 1],
-                                                                      previous_values_of_solution[3 * i + 2]});
+            // opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
+            //                                                           previous_values_of_solution[3 * i + 1],
+            //                                                           previous_values_of_solution[3 * i + 2]});
             auto ball = compute_free_ball(Eigen::Vector2d(previous_values_of_solution[3*i],
                                                           previous_values_of_solution[3*i+1]), lpoints);
 
@@ -250,15 +265,7 @@ namespace mpc
     std::tuple<float, float, float> MPC::update( std::vector<Eigen::Vector2f> near_obstacles, const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
     {
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        
-        
-        // std::cout<<"#################################"<<std::endl;
-        // std::cout<<state(0,0)<<std::endl;
-        // std::cout<<state(1,0)<<std::endl;
-        // // std::cout<<near_obstacles[0]<<std::endl;
-        // std::cout<<"#################################"<<std::endl;
-        // exit(0);
-// 
+
         // transform path to meters
         std::vector<Eigen::Vector2f> path_robot_meters(path_robot.size());
         for(const auto &[i, p] : path_robot | iter::enumerate)
@@ -282,13 +289,18 @@ namespace mpc
         auto opti_local = this->opti.copy();
         casadi::Slice all;
 
+        Balls balls;
+        balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25, Eigen::Vector2d(0.2, 0.3)});
+
+        
+
         for (auto k: iter::range(near_obstacles.size()))
         {
 
             for (auto i: iter::range(consts.num_steps)) // obstacle avoidance constraints
             {
                 // auto dist = sqrt( pow((state(0,i) - near_obstacles[k][0]),2) + pow((state(1,i) - near_obstacles[k][1]),2) );
-                opti_local.subject_to(casadi::MX::sqrt( casadi::MX::pow((pos(0,i) - near_obstacles[k][0]/1000.f),2) + casadi::MX::pow((pos(1,i) - near_obstacles[k][1]/1000.f),2) ) >= (.650 + .075) );
+                opti_local.subject_to(casadi::MX::sqrt( casadi::MX::pow((pos(0,i) - near_obstacles[k][0]/1000.f),2) + casadi::MX::pow((pos(1,i) - near_obstacles[k][1]/1000.f),2) ) >= (.300 + .075) );
 
             }
         }
@@ -306,6 +318,13 @@ namespace mpc
                 previous_values_of_solution[3 * i + 1] = paso.y();
                 previous_values_of_solution[3 * i + 2] = 0.0;
             }
+        }
+
+        for (auto i: iter::range(0u, consts.num_steps))
+        {
+            opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
+                                                                      previous_values_of_solution[3 * i + 1],
+                                                                      previous_values_of_solution[3 * i + 2]});
         }
 
         // cost function

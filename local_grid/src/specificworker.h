@@ -49,6 +49,7 @@
 #include "carrot.h"
 #include "dynamic_window.h"
 #include "qcustomplot/qcustomplot.h"
+#include <unordered_map>
 
 namespace py = pybind11;
 using namespace pybind11::literals; // to bring in the `_a` literal
@@ -60,6 +61,88 @@ class SpecificWorker : public GenericWorker
         SpecificWorker(TuplePrx tprx, bool startup_check);
         ~SpecificWorker();
         bool setParams(RoboCompCommonBehavior::ParameterList params);
+        struct Key
+        {
+            long int x;
+            long int z;
+        public:
+            Key() : x(0), z(0)
+            {};
+            Key(long int &&x, long int &&z) : x(std::move(x)), z(std::move(z))
+            {};
+            Key(long int &x, long int &z) : x(x), z(z)
+            {};
+            Key(float &x, float &z) : x((long int) x), z((long int) z)
+            {};
+            Key(const long int &x, const long int &z) : x(x), z(z)
+            {};
+            Key(const QPointF &p)
+            {
+                x = p.x();
+                z = p.y();
+            };
+            QPointF toQPointF() const
+            { return QPointF(x, z); };
+
+            bool operator==(const Key &other) const
+            {
+                return x == other.x && z == other.z;
+            };
+
+            void save(std::ostream &os) const
+            { os << x << " " << z << " "; }; //method to save the keys
+            void read(std::istream &is)
+            { is >> x >> z; };                       //method to read the keys
+        };
+
+        struct KeyHasher
+        {
+            std::size_t operator()(const Key &k) const
+            {
+                using boost::hash_combine;
+                using boost::hash_value;
+                // Start with a hash value of 0    .
+                std::size_t seed = 0;
+                // Modify 'seed' by XORing and bit-shifting in one member of 'Key' after the other:
+                hash_combine(seed, hash_value(k.x));
+                hash_combine(seed, hash_value(k.z));
+                return seed;
+            };
+        };
+
+        struct T
+        {
+            std::uint32_t id;
+            bool free = true;
+            bool visited = false;
+            float cost = 1;
+            float hits = 0;
+            float misses = 0;
+            QGraphicsRectItem *tile;
+            double log_odds = 0.0;  //log prior
+
+            // method to save the value
+            void save(std::ostream &os) const
+            { os << free << " " << visited; };
+
+            void read(std::istream &is)
+            { is >> free >> visited; };
+        };
+
+        using FMap = std::unordered_map<Key, T, KeyHasher>;
+        inline std::tuple<bool, T &> getCell(long int x, long int z);
+        inline std::tuple<bool, T &> getCell(const Key &k);
+        inline std::tuple<bool, T &> getCell(const Eigen::Vector2f &p);
+        typename FMap::iterator begin()
+        { return fmap.begin(); };
+        typename FMap::iterator end()
+        { return fmap.end(); };
+        typename FMap::const_iterator begin() const
+        { return fmap.begin(); };
+        typename FMap::const_iterator end() const
+        { return fmap.begin(); };
+        size_t size() const
+        { return fmap.size(); };
 
     public slots:
         void compute();
@@ -70,6 +153,7 @@ class SpecificWorker : public GenericWorker
     private:
         bool startup_check_flag;
         AbstractGraphicViewer *viewer;
+         FMap fmap;
 
         struct Constants
         {
@@ -160,6 +244,7 @@ class SpecificWorker : public GenericWorker
                 bool is_new_var=true;
 
         };
+        
         Target target;
         template <typename Func, typename Obj>
         auto quick_bind(Func f, Obj* obj)
