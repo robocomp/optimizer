@@ -157,7 +157,7 @@ class SpecificWorker : public GenericWorker
 
         struct Constants
         {
-            uint num_steps_mpc = 8;
+            uint num_steps_mpc = 10;
             const float max_advance_speed = 1500;
             float tile_size = 100;
             const float max_laser_range = 4000;

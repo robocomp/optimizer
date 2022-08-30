@@ -58,14 +58,19 @@ namespace mpc
             //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
             opti.subject_to( state(all, k + 1) == x_next);  // close  the gaps
         }
-        // for(const auto k : iter::range(N-1))  // acceleration constraints
-        // {
-        //     auto v1 = control(0,k);
-        //     auto v2 = control(0,k+1);
-        //     auto acc = (v2-v1)/dt;
-        //     //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
-        //     opti.subject_to(opti.bounded(-3.19, acc, 3.19)); 
-        // }
+        for(const auto k : iter::range(N-1))  // acceleration constraints
+        {
+            auto v1 = control(0,k);
+            auto v2 = control(0,k+1);
+            auto acc = (v2-v1)/dt;
+            //auto x_next = state(all, k) + dt * integrate(state(all,k), control(all,k));
+            opti.subject_to(opti.bounded(-3.19, acc, 3.19)); 
+            auto w1 = control(1,k);
+            auto w2 = control(1,k+1);
+            auto ang_acc = (w2-w1)/dt;
+            opti.subject_to(opti.bounded(-0.5, ang_acc, 0.5)); 
+        }
+
 
         // control constraints -----------
         opti.subject_to(opti.bounded(consts.min_advance_value, adv, consts.max_advance_value));  // control is limited meters
@@ -262,49 +267,40 @@ namespace mpc
         return std::make_tuple(new_center, current_dist, grad(new_center));
     }
 
-    std::tuple<float, float, float> MPC::update( std::vector<Eigen::Vector2f> near_obstacles, const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
+    MPC::Result MPC::update( double slack_weight, std::vector<Eigen::Vector2d> near_obstacles, const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
     {
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-
         // transform path to meters
         std::vector<Eigen::Vector2f> path_robot_meters(path_robot.size());
         for(const auto &[i, p] : path_robot | iter::enumerate)
         {
             path_robot_meters[i] = p / 1000.f;
-
         }
         
-
         // target in robot RS in meters
         auto target_robot = path_robot_meters.back();
-
-        if(path_robot.size() < consts.num_steps)
-        {
-            // std::cout<<"TEST"<<std::endl;
-            float adv = std::clamp(path_robot.back().norm(), 0.f, 500.f);
-            float rot = atan2(path_robot.back().x(), path_robot.back().y());
-            return std::make_tuple(adv, rot, 0.f);
-        }
 
         auto opti_local = this->opti.copy();
         casadi::Slice all;
 
+        std::vector<double> mu_vector(consts.num_steps, slack_weight);
+        std::vector<double> slack_init(consts.num_steps, 0.5);
+        opti_local.set_initial(slack_vector, slack_init);
+
+        double r = consts.robot_radius/1000.f;
+
         Balls balls;
-        balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), 0.25, Eigen::Vector2d(0.2, 0.3)});
+        balls.push_back(Ball{Eigen::Vector2d(0.0,0.0), r, Eigen::Vector2d(0.2, 0.3)});
 
-        
+        // for (auto k: iter::range(near_obstacles.size()))
+        // {
+        //     for (auto i: iter::range(consts.num_steps)) // obstacle avoidance constraints
+        //     {
+        //         auto dist = casadi::MX::sqrt( casadi::MX::pow((pos(0,i) - near_obstacles[k][0]/1000.f),2) + casadi::MX::pow((pos(1,i) - near_obstacles[k][1]/1000.f),2) );
+        //         opti_local.subject_to(dist >= (.300 + .075) );
 
-        for (auto k: iter::range(near_obstacles.size()))
-        {
-
-            for (auto i: iter::range(consts.num_steps)) // obstacle avoidance constraints
-            {
-                // auto dist = sqrt( pow((state(0,i) - near_obstacles[k][0]),2) + pow((state(1,i) - near_obstacles[k][1]),2) );
-                opti_local.subject_to(casadi::MX::sqrt( casadi::MX::pow((pos(0,i) - near_obstacles[k][0]/1000.f),2) + casadi::MX::pow((pos(1,i) - near_obstacles[k][1]/1000.f),2) ) >= (.300 + .075) );
-
-            }
-        }
-
+        //     }
+        // }
 
         // Warm start
         if (previous_values_of_solution.empty())
@@ -320,15 +316,70 @@ namespace mpc
             }
         }
 
-        for (auto i: iter::range(0u, consts.num_steps))
+        Eigen::Vector2d min_point;
+        Eigen::Vector2d center;        
+
+        if(near_obstacles.size()>0)
         {
-            opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
-                                                                      previous_values_of_solution[3 * i + 1],
-                                                                      previous_values_of_solution[3 * i + 2]});
+            for (auto i: iter::range(0, 8))
+            {
+                // opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
+                //                                                           previous_values_of_solution[3 * i + 1],
+                //                                                           previous_values_of_solution[3 * i + 2]});
+
+            
+                //------------------------------ COMPUTE FREE BALLS ------------------------------
+                center = Eigen::Vector2d(previous_values_of_solution[3*i], previous_values_of_solution[3*i+1]); // in meters
+                min_point = std::ranges::min(near_obstacles, [c=center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+                double initial_dist = (center-min_point).norm()- (consts.robot_radius/1000.f);
+                if(initial_dist > consts.max_ball_radius) //consts.max_ball_radius)
+                {
+                    std::cout<<"Initial dist: "<<initial_dist<<std::endl;
+                    auto ball = std::make_tuple(center, consts.max_ball_radius, Eigen::Vector2d());
+                    auto &[center, radius, gradient] = ball;
+                    balls.push_back(ball);
+                    opti_local.subject_to(casadi::MX::sqrt(casadi::MX::sumsqr(pos(all, i) - e2v(center) + r)) < (radius-.001)+ slack_vector(i));
+
+                }
+                else{
+                    auto grad = [near_obstacles ](const Eigen::Vector2d center) {
+                        auto dx = Eigen::Vector2d(0.1, 0.0);
+                        auto dy = Eigen::Vector2d(0.0, 0.1);
+                        auto min_dx_plus = std::ranges::min(near_obstacles, [c = center + dx](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+                        auto min_dx_minus = std::ranges::min(near_obstacles, [c = center - dx](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+                        auto min_dy_plus = std::ranges::min(near_obstacles, [c = center + dy](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+                        auto min_dy_minus = std::ranges::min(near_obstacles, [c = center - dy](auto a, auto b) { return (a - c).norm() < (b - c).norm(); });
+                        // compute normalized gradient
+                        return Eigen::Vector2d((min_dx_plus - (center + dx)).norm() - (min_dx_minus - (center - dx)).norm(),
+                                            (min_dy_plus - (center + dy)).norm() - (min_dy_minus - (center - dy)).norm()).normalized();
+                    };
+                    auto new_center = center;
+                    double step = 0;
+                    double current_dist = initial_dist;
+
+
+                    while(fabs(current_dist - (step + initial_dist)) < 0.005 )
+                    {
+                        step = step + 0.05;
+                        new_center = new_center + (grad(new_center) * step);
+                        min_point = std::ranges::min(near_obstacles, [c=new_center](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+                        current_dist = (new_center-min_point).norm()- (consts.robot_radius/1000.f);
+                        
+                    }
+                    // current_dist = std::max(0.32,(current_dist));
+                    
+                    // std::cout<<"Radius: "<<current_dist<<std::endl;
+                    auto ball = std::make_tuple(new_center, current_dist, grad(new_center));
+                    auto &[center, radius, gradient] = ball;
+                    balls.push_back(ball);
+                    opti_local.subject_to(casadi::MX::sqrt(casadi::MX::sumsqr(pos(all, i) - e2v(center) + r)) < (radius-.01)+ slack_vector(i));
+                }
+            }
         }
 
+
         // cost function
-        double alfa = 1.1;
+        double alfa = 1.001;
         auto sum_dist_target = opti_local.parameter();
         opti_local.set_value(sum_dist_target, 0.0);
         //target
@@ -345,11 +396,11 @@ namespace mpc
 //            sum_dist_local += pow(beta,k) * casadi::MX::sumsqr(state(all, k-1) - state(all, k));
 
         // minimze distance to each element of path
-        double beta = 0.99;
+        double beta = 1.5;
         auto sum_dist_path = opti_local.parameter();
         opti_local.set_value(sum_dist_path, 0.0);
-        for (auto k: iter::range(consts.num_steps-4))
-            sum_dist_path += casadi::MX::sumsqr(pos(all, k) - e2v(path_robot_meters[k].cast<double>()));
+        for (auto k: iter::range(consts.num_steps))
+            sum_dist_path += pow(beta,k)*casadi::MX::sumsqr(pos(all, k) - e2v(path_robot_meters[k].cast<double>()));
 
         // minimze sum of rotations
         auto sum_rot = opti_local.parameter();
@@ -357,14 +408,24 @@ namespace mpc
         for (auto k: iter::range(consts.num_steps))
             sum_rot += casadi::MX::sumsqr(rot(k));
 
+        // minimze slack sums
+        auto sum_slack = opti_local.parameter();
+        opti_local.set_value(sum_slack, 0.0);
+        for (auto k: iter::range(consts.num_steps))
+            sum_slack += casadi::MX::sumsqr(slack_vector(k));
+
         //  J
-//        opti_local.minimize( sum_dist_path + 0.1*sum_dist_target + sum_rot +
-//                             casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
-//                             casadi::MX::dot(slack_vector, mu_vector));
+    //    opti_local.minimize( sum_dist_path + 0.1*sum_dist_target + sum_rot +
+    //                         casadi::MX::sumsqr(pos(all, consts.num_steps) - t) +
+    //                         casadi::MX::dot(slack_vector, mu_vector));
 
 
-        
-        opti_local.minimize( sum_dist_path  + 0*sum_dist_target + 0.01*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.1*sum_rot); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
+        opti_local.minimize( 1*sum_dist_path  + 0.00*sum_dist_target +
+                             0.0*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 0.0*sum_rot+ slack_weight*sum_slack);
+                            //  casadi::MX::dot(slack_vector, mu_vector));
+        // opti_local.minimize( sum_dist_path  + 0*sum_dist_target + 0.01*casadi::MX::sumsqr(pos(all, consts.num_steps) - t) + 
+        //                     0.001*sum_rot +
+        //                      casadi::MX::dot(slack_vector, mu_vector)); // + casadi::MX::sumsqr(control(0,consts.num_steps-1)-0));
 
         // solve NLP ------
         try
@@ -394,7 +455,7 @@ namespace mpc
             qInfo() << __FUNCTION__ << "Status:" << QString::fromStdString(solution.stats().at("return_status"));
 
             advance = advance * gaussian(rotation);
-            return std::make_tuple(advance, rotation, 0.f);
+            return std::make_tuple(advance, rotation, solution, balls);
         }
         catch (...)
         {

@@ -116,13 +116,20 @@ void SpecificWorker::compute()
     // std::cout<<g2r.cols()<<std::endl;
     for(const auto &[key, value] : grid)
     {
-        if(not value.free and (g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2).norm() <=1000)// from_world_to_robot(Eigen::Vector2f(key.x, key.z)).norm() <= 1000)
+        if(not value.free and (g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2).norm() <=2000)// from_world_to_robot(Eigen::Vector2f(key.x, key.z)).norm() <= 1000)
         {
-            near_obstacles.push_back((g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2));
+            near_obstacles.push_back((g2r * Eigen::Vector3f(key.x, key.z, 1.f)).head(2)/1000);
         }
     
     }
-    std::cout<<"Number of obstacles: "<<near_obstacles.size()<<std::endl;    
+    std::vector<Eigen::Vector2d> near_obstacles_double; // = current_path_robot.cast<double>();
+    for (auto i: iter::range(near_obstacles.size()))
+    {
+        // std::cout<<"---------------------------------"<<std::endl;
+        near_obstacles_double.push_back(near_obstacles[i].cast<double>());
+
+    }
+    std::cout<<"Number of obstacles: "<<near_obstacles_double.size()<<std::endl;    
 
     // Bill
     //read_bill(robot_pose);  // sets target at 1m from Bill
@@ -178,7 +185,7 @@ void SpecificWorker::compute()
         draw_path_smooth(current_path_robot);
 
         float advf=0.f, rotf=0.f, sidef=0.f;
-        if(current_path_robot[5][1]<0) //current_path_robot[5][1]<0)
+        if(current_path_robot[3][1]<0) //current_path_robot[5][1]<0)
         {
             // std::cout<<"Test"<<std::endl;
             // advf = 0;
@@ -186,12 +193,53 @@ void SpecificWorker::compute()
             // move_robot(0,0.5);
             // target_r = from_world_to_robot(target.to_eigen());
         }
-        if(current_path_robot[3][1]>=0)
-        {
+        else{
         if(control == Control::MPC)
         {
-            auto [adv, rot, side]  = mpc.update(near_obstacles, current_path_robot, robot_polygon, &viewer->scene);
-            advf = adv; rotf = rot; sidef = side;
+            // auto [adv, rot, side]  
+            if(current_path_robot.size() < constants.num_steps_mpc)
+            {
+                // std::cout<<"TEST"<<std::endl;
+                advf = std::clamp(current_path_robot.back().norm(), 0.f, 500.f);
+                rotf = atan2(current_path_robot.back().x(), current_path_robot.back().y());
+                // return std::make_tuple(adv, rot, 0.f);
+            }
+            else{
+                double slack_weight = 5;
+                double prev_dist = 999.999;
+                double sel_slack = slack_weight;
+                // for(int i=1; i<=3; i++){
+                    
+                //     auto r = mpc.update(slack_weight, near_obstacles_double, current_path_robot, robot_polygon, &viewer->scene);
+                //     auto [adv, rot, solution, balls] = r.value();
+                //     // advf = adv; rotf = rot; 
+                //     auto path = std::vector<double>(solution.value(mpc.pos));  //in meters
+                //     auto current_dist = 999.999;
+                //     for(int i = 0; i<path.size()-1; i+=2){
+                //         auto path_point = Eigen::Vector2f(path[i], path[i+1]);
+                //         auto min_point = std::ranges::min(near_obstacles, [c=path_point](auto a, auto b){ return (a-c).norm() < (b-c).norm();});
+                //         if((path_point-min_point).norm()<current_dist){
+                //             current_dist = (path_point-min_point).norm();
+                //         }
+                //     }
+                //     if(current_dist < prev_dist){
+                //         prev_dist = current_dist;
+                //         sel_slack =  slack_weight;
+                //     }
+                //     std::cout<<"############################ Slack_weight: "<<slack_weight<<std::endl;
+                //     slack_weight = slack_weight/2;
+                //     std::cout<<"############################ current_dist: "<<current_dist<<std::endl;
+                // }
+                // std::cout<<"############################ Selected slack_weight: "<<sel_slack<<std::endl;
+                auto r = mpc.update(sel_slack, near_obstacles_double, current_path_robot, robot_polygon, &viewer->scene);
+                auto [adv, rot, solution, balls] = r.value();
+                advf = adv; rotf = rot; 
+                auto path = std::vector<double>(solution.value(mpc.pos));
+                draw_solution_path(path, balls);
+                // exit(0);
+                // draw_solution_path(current_path_robot_double, balls);
+            }
+            
             // goto_target_mpc(current_path_robot_double, ldata);
         }
         if(control == Control::DWA)
@@ -578,7 +626,7 @@ void SpecificWorker::draw_solution_path(const std::vector<double> &path, const m
     std::vector<Eigen::Vector2f> path_centers;
     for(auto &&[i, p] : iter::chunked(path, 2) | iter::enumerate)
     {
-        auto pw = from_robot_to_world(Eigen::Vector2f(p[0], p[1])*1000);  // in mm
+        auto pw = from_robot_to_world(Eigen::Vector2f(p[0]*1000, p[1]*1000));  // in mm
         path_centers.push_back(pw);
         path_paint.push_back(viewer->scene.addEllipse(pw.x()-s/2, pw.y()-s/2, s , s, QPen(path_color), QBrush(QColor(path_color))));
         path_paint.back()->setZValue(30);
@@ -590,6 +638,7 @@ void SpecificWorker::draw_solution_path(const std::vector<double> &path, const m
     {
         auto bc = from_robot_to_world(center.cast<float>()*1000);
         auto nr = r*1000;
+        std::cout<<"###############"<<nr<<std::endl;
         ball_paint.push_back(viewer->scene.addEllipse(bc.x()-nr, bc.y()-nr, nr*2 , nr*2, QPen(QBrush("DarkBlue"),15), QBrush(QColor(ball_color))));
         ball_paint.back()->setZValue(15);
         ball_paint.back()->setOpacity(0.2);
