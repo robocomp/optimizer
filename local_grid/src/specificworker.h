@@ -157,7 +157,7 @@ class SpecificWorker : public GenericWorker
 
         struct Constants
         {
-            uint num_steps_mpc = 10;
+            uint num_steps_mpc = 8;
             const float max_advance_speed = 1500;
             float tile_size = 100;
             const float max_laser_range = 4000;
@@ -177,7 +177,14 @@ class SpecificWorker : public GenericWorker
             const float prob_free = 0.4;            // Probability that cell is free with total confidence
             const int period_to_check_occluded_path = 400; //ms
         };
+        struct Move_cmd
+        {
+            float advf=0.f, rotf=0.f, sidef=0.f;
+            int weight_check = 0;
+        };
         Constants constants;
+        Move_cmd movement;
+
 
         //robot
         struct Pose2D

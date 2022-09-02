@@ -267,7 +267,7 @@ namespace mpc
         return std::make_tuple(new_center, current_dist, grad(new_center));
     }
 
-    MPC::Result MPC::update( double slack_weight, std::vector<Eigen::Vector2d> near_obstacles, const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
+    MPC::Result MPC::update( float adv_prev, double slack_weight, std::vector<Eigen::Vector2d> near_obstacles, const std::vector<Eigen::Vector2f> &path_robot, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene)
     {
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         // transform path to meters
@@ -315,13 +315,16 @@ namespace mpc
                 previous_values_of_solution[3 * i + 2] = 0.0;
             }
         }
+        // auto acc = (control(0,0)-adv_prev)/0.5;
+        // opti_local.subject_to((control(0,0)-adv_prev)/0.5 <= 3.19); 
+        // opti_local.subject_to((control(0,0)-adv_prev)/0.5 >= -3.19); 
 
         Eigen::Vector2d min_point;
         Eigen::Vector2d center;        
 
         if(near_obstacles.size()>0)
         {
-            for (auto i: iter::range(0, 8))
+            for (auto i: iter::range(consts.num_steps))
             {
                 // opti_local.set_initial(state(all, i), std::vector<double>{previous_values_of_solution[3 * i],
                 //                                                           previous_values_of_solution[3 * i + 1],

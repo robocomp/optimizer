@@ -68,7 +68,7 @@ namespace mpc
 
             casadi::Opti initialize_differential(const int N);
             Result minimize_balls_path( const std::vector<Eigen::Vector2d> &path, const Eigen::Vector3d &current_pose_meters, const RoboCompLaser::TLaserData &ldata);
-            Result2 update( double slack_weight, std::vector<Eigen::Vector2d> near_obstacles, const std::vector<Eigen::Vector2f> &path, QGraphicsPolygonItem *robot_polygon = nullptr,
+            Result2 update( float adv_prev, double slack_weight, std::vector<Eigen::Vector2d> near_obstacles, const std::vector<Eigen::Vector2f> &path, QGraphicsPolygonItem *robot_polygon = nullptr,
                                                     QGraphicsScene *scene = nullptr);
             casadi::MX pos;
             casadi::MX rot;
