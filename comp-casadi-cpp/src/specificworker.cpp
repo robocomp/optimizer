@@ -227,7 +227,7 @@ std::optional<std::tuple<double, double, casadi::OptiSol, SpecificWorker::Balls>
 
         auto &[center, radius, grad] = ball;
         double r = consts.robot_radius/1000.f;
-        opti_local.subject_to(casadi::MX::sumsqr(pos(all, i) - e2v(center) + r) < (radius-0.01) + slack_vector(i));
+        opti_local.subject_to(casadi::MX::sqrt(casadi::MX::sumsqr(pos(all, i) - e2v(center) + r)) < (radius-0.01) + slack_vector(i));
         balls.push_back(ball);
     }
 

@@ -21,11 +21,12 @@ namespace mpc
             using Ball = std::tuple<Eigen::Vector2d, float, Eigen::Vector2d>;
             using Balls = std::vector<Ball>;
             using Result = std::optional<std::tuple<double, double, casadi::OptiSol, MPC::Balls>>;
+            using Result2 = std::optional<std::tuple<double, double, casadi::OptiSol, MPC::Balls>>;
 
             struct Constants
             {
                 unsigned int num_steps = 8;                     // MPC steps ahead
-                const float robot_radius = 300;
+                const float robot_radius = 320;
                 double gauss_dist = 0.1;                // minimun distance to a lidar-gaussian as constraint
                 double point_dist = 0.2;                // value in lidar-gaussian at lidar points (corners)
                 double point_sigma = 0.07;              // variance for point (corners) gaussians
@@ -67,7 +68,7 @@ namespace mpc
 
             casadi::Opti initialize_differential(const int N);
             Result minimize_balls_path( const std::vector<Eigen::Vector2d> &path, const Eigen::Vector3d &current_pose_meters, const RoboCompLaser::TLaserData &ldata);
-            std::tuple<float, float, float> update( std::vector<Eigen::Vector2f> near_obstacles, const std::vector<Eigen::Vector2f> &path, QGraphicsPolygonItem *robot_polygon = nullptr,
+            Result2 update( float adv_prev, double slack_weight, std::vector<Eigen::Vector2d> near_obstacles, const std::vector<Eigen::Vector2f> &path, QGraphicsPolygonItem *robot_polygon = nullptr,
                                                     QGraphicsScene *scene = nullptr);
             casadi::MX pos;
             casadi::MX rot;
@@ -86,6 +87,7 @@ namespace mpc
 
             std::vector<double> e2v(const Eigen::Vector2d &v);
             Ball compute_free_ball(const Eigen::Vector2d &center, const std::vector<Eigen::Vector2d> &lpoints);
+            Ball compute_free_ball2(const Eigen::Vector2f &center, const std::vector<Eigen::Vector2d> &near_obstacles);
             void draw_path(const std::vector<double> &path_robot_meters, QGraphicsPolygonItem *robot_polygon, QGraphicsScene *scene);
             float gaussian(float x);
     };

@@ -177,7 +177,14 @@ class SpecificWorker : public GenericWorker
             const float prob_free = 0.4;            // Probability that cell is free with total confidence
             const int period_to_check_occluded_path = 400; //ms
         };
+        struct Move_cmd
+        {
+            float advf=0.f, rotf=0.f, sidef=0.f;
+            int weight_check = 0;
+        };
         Constants constants;
+        Move_cmd movement;
+
 
         //robot
         struct Pose2D

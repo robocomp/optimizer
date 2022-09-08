@@ -130,22 +130,6 @@ QGraphicsScene
 Laser.h
 -
 
-/home/kaustab_rrc/robocomp/components/optimizer/local_grid/src/mpc.cpp
-mpc.h
-/home/kaustab_rrc/robocomp/components/optimizer/local_grid/src/mpc.h
-cppitertools/range.hpp
--
-cppitertools/enumerate.hpp
--
-cppitertools/chunked.hpp
--
-QGraphicsScene
--
-QPen
--
-QBrush
--
-
 /home/kaustab_rrc/robocomp/components/optimizer/local_grid/src/mpc.h
 casadi/casadi.hpp
 -
@@ -3532,10 +3516,6 @@ QtCore/qvector.h
 QtCore/qscopedpointer.h
 -
 
-/usr/include/x86_64-linux-gnu/qt5/QtGui/QBrush
-qbrush.h
-/usr/include/x86_64-linux-gnu/qt5/QtGui/qbrush.h
-
 /usr/include/x86_64-linux-gnu/qt5/QtGui/QColor
 qcolor.h
 /usr/include/x86_64-linux-gnu/qt5/QtGui/qcolor.h
@@ -3583,10 +3563,6 @@ qevent.h
 /usr/include/x86_64-linux-gnu/qt5/QtGui/QPainter
 qpainter.h
 /usr/include/x86_64-linux-gnu/qt5/QtGui/qpainter.h
-
-/usr/include/x86_64-linux-gnu/qt5/QtGui/QPen
-qpen.h
-/usr/include/x86_64-linux-gnu/qt5/QtGui/qpen.h
 
 /usr/include/x86_64-linux-gnu/qt5/QtGui/QPixmap
 qpixmap.h
